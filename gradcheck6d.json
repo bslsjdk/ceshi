@@ -1,0 +1,69 @@
+{
+  "base_loss": 4.174400739505761,
+  "rows": [
+    {
+      "name": "adapter_b",
+      "idx": "(3, 2, 0)",
+      "eps": 0.001,
+      "analytic": 1.08e-06,
+      "numeric": 5.04e-06,
+      "rel_err": 0.64641
+    },
+    {
+      "name": "adapter_b",
+      "idx": "(3, 2, 0)",
+      "eps": 0.01,
+      "analytic": 1.08e-06,
+      "numeric": 5e-07,
+      "rel_err": 0.364604
+    },
+    {
+      "name": "adapter_b",
+      "idx": "(3, 2, 0)",
+      "eps": 0.1,
+      "analytic": 1.08e-06,
+      "numeric": 1.21e-06,
+      "rel_err": 0.055481
+    },
+    {
+      "name": "adapter_a",
+      "idx": "(1, 0, 3)",
+      "eps": 0.01,
+      "analytic": -5.5e-07,
+      "numeric": -1.01e-06,
+      "rel_err": 0.297613
+    },
+    {
+      "name": "adapter_a",
+      "idx": "(1, 0, 3)",
+      "eps": 0.1,
+      "analytic": -5.5e-07,
+      "numeric": -5e-07,
+      "rel_err": 0.039693
+    },
+    {
+      "name": "bias",
+      "idx": "(5,)",
+      "eps": 0.001,
+      "analytic": 0.00040051,
+      "numeric": 0.00038845,
+      "rel_err": 0.015287
+    },
+    {
+      "name": "bias",
+      "idx": "(5,)",
+      "eps": 0.01,
+      "analytic": 0.00040051,
+      "numeric": 0.00040005,
+      "rel_err": 0.000575
+    },
+    {
+      "name": "bias",
+      "idx": "(5,)",
+      "eps": 0.1,
+      "analytic": 0.00040051,
+      "numeric": 0.0003995,
+      "rel_err": 0.001269
+    }
+  ]
+}
