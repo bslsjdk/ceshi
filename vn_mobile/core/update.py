@@ -14,8 +14,7 @@ State:
 
 Without the restoring term the energy map has a transcritical bifurcation at
 sigma = lam/kappa: below it the only fixed point is e*=0 (dead), above it the
-map runs away (explodes).  lam*e_target removes the bifurcation and puts the
-fixed point at e* ~ e_target for the whole parameter space.
+map runs away.  lam*e_target removes that: e* ~ e_target everywhere.
 """
 from __future__ import annotations
 
@@ -57,16 +56,24 @@ def _adjacency(pop: VNPopulation):
     return pop.A1, pop.Aw
 
 
+def fused_groups(pop: VNPopulation) -> np.ndarray:
+    """W + B@A per adapter group -> float32 [M, DIM, DIM], M = N or n_zones."""
+    return (np.matmul(pop.adapter_b, pop.adapter_a) + pop.W[None]).astype(
+        np.float32)
+
+
 def _fused(pop: VNPopulation) -> np.ndarray:
     """W + B_i @ A_i as one [N, DIM, DIM] stack.
 
     The state update used two batched matmuls plus a dense Wx per tick;
     because W and the adapters are frozen between training steps they can be
     collapsed into a single per-neuron 8x8 matrix first -- 48 us -> 19 us.
-    Callers must drop the cache (``pop.WM = None``) after training.
+    Callers drop the cache (``pop.WM = None``) after training; ``zone_of``
+    gathers per-zone adapters out to one matrix per neuron.
     """
     if pop.WM is None:
-        pop.WM = np.matmul(pop.adapter_b, pop.adapter_a) + pop.W[None]
+        ba = fused_groups(pop)
+        pop.WM = ba if pop.zone_of is None else ba[pop.zone_of]
     return pop.WM
 
 
