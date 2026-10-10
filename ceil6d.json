@@ -1,0 +1,10 @@
+[
+  {
+    "lr": 0.0003,
+    "sklearn_val_bits": 6.1005,
+    "sklearn_val_acc": 0.214,
+    "sklearn_fit_bits": 2.8157,
+    "field_val_bits": 4.3446,
+    "gap": -1.7559
+  }
+]
