@@ -1,0 +1,63 @@
+{
+  "model": "VN",
+  "params": 9368,
+  "final": {
+    "val_bits": 4.331,
+    "val_acc": 0.2013
+  },
+  "wall_s": 293.2,
+  "curve": [
+    {
+      "step": 25000,
+      "train_bits": 4.4558
+    },
+    {
+      "step": 50000,
+      "train_bits": 3.6764
+    },
+    {
+      "step": 75000,
+      "train_bits": 3.5345
+    },
+    {
+      "step": 100000,
+      "train_bits": 3.8758
+    },
+    {
+      "step": 125000,
+      "train_bits": 3.6254
+    },
+    {
+      "step": 150000,
+      "train_bits": 3.3306
+    },
+    {
+      "step": 175000,
+      "train_bits": 4.0098
+    },
+    {
+      "step": 200000,
+      "train_bits": 3.5242
+    },
+    {
+      "step": 225000,
+      "train_bits": 4.146
+    },
+    {
+      "step": 250000,
+      "train_bits": 4.1222
+    },
+    {
+      "step": 275000,
+      "train_bits": 4.0369
+    },
+    {
+      "step": 300000,
+      "train_bits": 5.1132
+    }
+  ],
+  "rss_mb": 38.8,
+  "budget": 300000,
+  "lr": 0.001,
+  "seed": 0
+}

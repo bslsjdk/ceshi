@@ -1,0 +1,40 @@
+{
+  "model": "TF_T64",
+  "params": 9448,
+  "steps": 4687,
+  "final": {
+    "val_bits": 3.6876,
+    "val_acc": 0.257
+  },
+  "wall_s": 3.2,
+  "curve": [
+    {
+      "step": 49984,
+      "train_bits": 3.7805
+    },
+    {
+      "step": 99968,
+      "train_bits": 4.2004
+    },
+    {
+      "step": 149952,
+      "train_bits": 3.6258
+    },
+    {
+      "step": 199936,
+      "train_bits": 3.2654
+    },
+    {
+      "step": 249920,
+      "train_bits": 3.5373
+    },
+    {
+      "step": 299904,
+      "train_bits": 3.4117
+    }
+  ],
+  "rss_mb": 28.7,
+  "budget": 300000,
+  "lr": 0.001,
+  "seed": 0
+}

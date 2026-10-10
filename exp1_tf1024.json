@@ -1,0 +1,40 @@
+{
+  "model": "TF_T1024",
+  "params": 9448,
+  "steps": 292,
+  "final": {
+    "val_bits": 3.9845,
+    "val_acc": 0.2324
+  },
+  "wall_s": 57.5,
+  "curve": [
+    {
+      "step": 49152,
+      "train_bits": 4.9366
+    },
+    {
+      "step": 98304,
+      "train_bits": 4.6136
+    },
+    {
+      "step": 147456,
+      "train_bits": 4.4624
+    },
+    {
+      "step": 196608,
+      "train_bits": 4.2225
+    },
+    {
+      "step": 245760,
+      "train_bits": 4.0244
+    },
+    {
+      "step": 294912,
+      "train_bits": 3.9924
+    }
+  ],
+  "rss_mb": 187.6,
+  "budget": 300000,
+  "lr": 0.001,
+  "seed": 0
+}

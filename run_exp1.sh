@@ -1,0 +1,10 @@
+cd /data/workspace/ceshi
+echo "=== VN budget=300k ==="
+timeout 1500 python3 exp1.py --which vn --budget 300000 --lr 1e-3 --out exp1_vn.json 2>&1 | grep -E "RESULT|model"
+echo "=== TF T=64 ==="
+timeout 600 python3 exp1.py --which tf --tf-T 64  --budget 300000 --lr 1e-3 --out exp1_tf64.json 2>&1 | grep -E "RESULT"
+echo "=== TF T=256 ==="
+timeout 900 python3 exp1.py --which tf --tf-T 256 --budget 300000 --lr 1e-3 --out exp1_tf256.json 2>&1 | grep -E "RESULT"
+echo "=== TF T=1024 ==="
+timeout 900 python3 exp1.py --which tf --tf-T 1024 --budget 300000 --lr 1e-3 --out exp1_tf1024.json 2>&1 | grep -E "RESULT"
+echo "ALLDONE"

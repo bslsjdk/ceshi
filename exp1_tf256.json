@@ -1,0 +1,40 @@
+{
+  "model": "TF_T256",
+  "params": 9448,
+  "steps": 1171,
+  "final": {
+    "val_bits": 3.8407,
+    "val_acc": 0.25
+  },
+  "wall_s": 8.7,
+  "curve": [
+    {
+      "step": 49920,
+      "train_bits": 4.1377
+    },
+    {
+      "step": 99840,
+      "train_bits": 3.9624
+    },
+    {
+      "step": 149760,
+      "train_bits": 3.8246
+    },
+    {
+      "step": 199680,
+      "train_bits": 3.8213
+    },
+    {
+      "step": 249600,
+      "train_bits": 3.7068
+    },
+    {
+      "step": 299520,
+      "train_bits": 3.6909
+    }
+  ],
+  "rss_mb": 32.6,
+  "budget": 300000,
+  "lr": 0.001,
+  "seed": 0
+}
