@@ -12,18 +12,23 @@ from vn_mobile.core.neuron import (
     quantise_u8,
 )
 from vn_mobile.core.update import (
+    ENERGY_CAP,
+    E_TARGET,
     aggregate,
     neighbour_mean,
     normalise_energy,
     read_output,
     step_energy,
+    step_phase,
     step_state,
+    sync_order_parameter,
 )
 from vn_mobile.core.field import Field
 
 
-def make_pop(n=64, degree=8, seed=1):
-    return build_population(n=n, degree=degree, seed=seed)
+def make_pop(n=64, degree=8, seed=1, weight_sigma=0.1):
+    return build_population(n=n, degree=degree, seed=seed,
+                            weight_sigma=weight_sigma)
 
 
 def test_field_bit_widths():
@@ -92,7 +97,7 @@ def test_normalise_scales_total_only_when_over():
     assert normalise_energy(pop) is False
     pop.energy[:] = 5.0
     assert normalise_energy(pop) is True
-    assert float(pop.energy.sum()) <= 0.3 * pop.n + 1e-4
+    assert float(pop.energy.sum()) <= ENERGY_CAP * pop.n + 1e-4
 
 
 def test_output_scales_with_energy_and_state():
@@ -121,3 +126,75 @@ def test_short_run_has_no_nan_and_stays_bounded():
     assert st.energy_max < 0.95
     assert st.top_frac < 0.01
     assert np.isfinite(f.pop.state).all()
+
+
+# ---------------------------------------------------------------- stage 2
+
+def test_phase_stays_wrapped():
+    pop = make_pop(n=64, seed=21)
+    for _ in range(500):
+        step_phase(pop)
+    assert (pop.phase >= 0.0).all()
+    assert (pop.phase < 2.0 * np.pi).all()
+
+
+def test_sync_order_parameter_in_unit_range():
+    pop = make_pop(n=64, seed=23)
+    pop.phase[:] = 0.0
+    assert sync_order_parameter(pop) == pytest.approx(1.0)
+    pop.phase[:] = np.linspace(0.0, 2.0 * np.pi, pop.n, endpoint=False)
+    assert sync_order_parameter(pop) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_energy_fixed_point_sits_at_target():
+    """The restoring term pins the mean at e_target, with no bifurcation."""
+    for sigma in (0.1, 1.0, 4.0):
+        f = Field(make_pop(n=256, seed=31, weight_sigma=sigma), seed=31)
+        st = f.run(3000)
+        assert st.nan is False
+        # spec allows +/-20%; strong drive pulls the mean slightly below
+        # e_target because mean(tanh(g)) is not exactly zero
+        assert abs(st.energy_mean - E_TARGET) / E_TARGET < 0.20, sigma
+
+
+def test_strong_coupling_synchronises_weak_does_not():
+    """Kuramoto transition: R jumps from ~0 to ~1 as K crosses K_c."""
+    rs = {}
+    for k in (0.05, 0.5):
+        f = Field(make_pop(n=256, seed=37), seed=37, k_coupling=k)
+        rs[k] = f.run(4000).sync_r
+    assert rs[0.05] < 0.3
+    assert rs[0.5] > 0.9
+
+
+def test_weak_drive_leaves_field_flat():
+    """Documents why sigma=0.1 is not viable: e_std collapses to ~2% of mean."""
+    f = Field(make_pop(n=256, seed=41), seed=41)
+    st = f.run(3000)
+    assert st.energy_std < 0.02
+    assert st.neg_frac == 0.0
+
+
+def test_wave_spreads_outward_from_seed():
+    """Seed decays while outer shells light up -> the disturbance travels."""
+    from diffusion import bfs_layers, run_diffusion
+    res = run_diffusion(n=400, degree=8, seed=0, sigma=4.0, k_coupling=0.2,
+                        warmup=1500, observe=60, amp=0.5, max_layers=4)
+    trace = res["trace"]
+    seed_layer, outer = trace[:, 0], trace[:, 2]
+    assert seed_layer[0] > 0.2                 # seed is disturbed
+    assert seed_layer[-1] < seed_layer[0]      # and decays
+    assert outer[-1] > outer[0] * 2            # while the shell lights up
+
+
+def test_encoder_input_does_not_move_the_energy_field():
+    """Known gap: e and h are decoupled, so a text input cannot steer the wave.
+
+    The causal effect is measured against a control run because the field
+    drifts on its own; comparing against its own baseline would be meaningless.
+    """
+    from diffusion import run_diffusion
+    res = run_diffusion(n=200, degree=8, seed=0, sigma=4.0, k_coupling=0.2,
+                        warmup=800, observe=30, amp=0.5, max_layers=3)
+    assert res["encoder_h_after"] > 0.1        # the state layer does respond
+    assert res["encoder_e_shift"] < 1e-6       # but the energy field does not
