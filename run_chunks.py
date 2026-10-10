@@ -22,6 +22,8 @@ def load(args) -> Field:
         z = np.load("ckpt.npz", allow_pickle=True)
         f.pop.energy[:] = z["energy"]
         f.pop.state[:] = z["state"]
+        if "phase" in z:
+            f.pop.phase[:] = z["phase"]
         f.stats.step = int(z["step"])
         f.stats.rescales = int(z["rescales"])
         f.rng.bit_generator.state = z["rng_state"].item()
@@ -35,6 +37,7 @@ def load(args) -> Field:
 
 def save(f: Field) -> None:
     np.savez("ckpt.npz", energy=f.pop.energy, state=f.pop.state,
+             phase=f.pop.phase,
              step=f.stats.step, rescales=f.stats.rescales,
              rng_state=np.array(f.rng.bit_generator.state, dtype=object))
 
@@ -44,8 +47,8 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=1000)
     ap.add_argument("--degree", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--sigma", type=float, default=4.0)
-    ap.add_argument("--kappa", type=float, default=0.047)
+    ap.add_argument("--sigma", type=float, default=0.1)
+    ap.add_argument("--kappa", type=float, default=0.05)
     ap.add_argument("--init-state", type=float, default=0.01)
     ap.add_argument("--chunk", type=int, default=100_000)
     args = ap.parse_args()
