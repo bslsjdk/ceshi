@@ -24,11 +24,12 @@ import numpy as np
 from .neuron import TWO_PI, VNPopulation
 
 LAMBDA = 0.1
-KAPPA = 0.05
+KAPPA = 0.25          # stage 3: 5x stage-2 value, widens the fluctuation band
 E_TARGET = 0.3
 ETA_STD = 0.001
 ALPHA = 0.9
 K_COUPLING = 0.5
+GAMMA_I = 0.5         # stage 3: input reaches the wave field directly
 # Safety net only.  With the restoring term the mean sits at e_target, so a
 # cap at 0.3 would fire constantly and mask what we are trying to measure;
 # 1.0 lets the field run freely and only catches genuine runaway.
@@ -67,7 +68,9 @@ def neighbour_mean(pop: VNPopulation, values: np.ndarray) -> np.ndarray:
 def step_energy(pop: VNPopulation, rng: np.random.Generator,
                 lam: float = LAMBDA, kappa: float = KAPPA,
                 eta_std: float = ETA_STD,
-                e_target: float = E_TARGET) -> None:
+                e_target: float = E_TARGET,
+                injection: np.ndarray | None = None,
+                gamma_i: float = GAMMA_I) -> None:
     """Advance the energy field one tick (in place).
 
     cos(phi_j - phi_i) is recomputed every tick because the phase now moves.
@@ -78,6 +81,8 @@ def step_energy(pop: VNPopulation, rng: np.random.Generator,
     drive = kappa * np.tanh(g / np.sqrt(pop.deg))
     pop.energy *= (1.0 - lam)
     pop.energy += lam * e_target + drive
+    if injection is not None:
+        pop.energy += (gamma_i * injection).astype(np.float32)
     if eta_std > 0.0:
         pop.energy += rng.normal(0.0, eta_std, size=pop.n).astype(np.float32)
 
