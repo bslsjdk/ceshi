@@ -1,0 +1,106 @@
+{
+  "signed_kernel": {
+    "n_edges": 8000,
+    "frac_positive": 1.0,
+    "frac_negative": 0.0
+  },
+  "frontier": [
+    {
+      "round": 1,
+      "top_nodes": [
+        774,
+        925,
+        690,
+        11,
+        8,
+        331
+      ],
+      "mass": 0.1463
+    },
+    {
+      "round": 2,
+      "top_nodes": [
+        774,
+        925,
+        11,
+        331,
+        439,
+        607
+      ],
+      "mass": 0.1117
+    },
+    {
+      "round": 3,
+      "top_nodes": [
+        331,
+        774,
+        925,
+        607,
+        690,
+        758
+      ],
+      "mass": 0.091
+    },
+    {
+      "round": 4,
+      "top_nodes": [
+        331,
+        774,
+        925,
+        607,
+        862,
+        758
+      ],
+      "mass": 0.0825
+    },
+    {
+      "round": 5,
+      "top_nodes": [
+        331,
+        862,
+        607,
+        925,
+        774,
+        632
+      ],
+      "mass": 0.0806
+    },
+    {
+      "round": 6,
+      "top_nodes": [
+        862,
+        331,
+        632,
+        695,
+        607,
+        499
+      ],
+      "mass": 0.0845
+    }
+  ],
+  "activated": {
+    "char": "'F'",
+    "top_after": [
+      {
+        "node": 862,
+        "sim_to_char": 0.217
+      },
+      {
+        "node": 331,
+        "sim_to_char": 0.233
+      },
+      {
+        "node": 632,
+        "sim_to_char": 0.167
+      },
+      {
+        "node": 695,
+        "sim_to_char": 0.341
+      },
+      {
+        "node": 607,
+        "sim_to_char": 0.388
+      }
+    ]
+  }
+}
