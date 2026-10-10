@@ -1,134 +1,133 @@
-"""Region management: RZ resident, EZ external, FVN / EVN / TVN (stage 4).
+"""Stage 4 region management: RZ / EZ zones, FVN / EVN neurons, TVN timers.
 
-Every slot is preallocated and the CSR graph never changes shape.  Loading an
-EVN activates a slot, releasing deactivates it.  A C++ port wants exactly this:
-no per-tick graph surgery, only an active mask the update kernel skips.
+No new equations are added here.  This module only owns *where* a neuron lives
+and *when* it is allowed to change:
+
+    RZ  resident zone, always in memory
+    EZ  external zone, loaded on demand, released when it goes quiet
+    TZ  trial zone (see trial.py)
+
+    FVN fixed neuron, ``frozen=True``, never mutated
+    EVN external neuron, lives in the pool until loaded into EZ
+    TVN timed neuron, fires a wave when its clock comes due
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
-from .neuron import MODE_ACTIVE, MODE_BACKGROUND, MODE_RESIDENT, MODE_SAFE
+from .neuron import MODE_BACKGROUND, MODE_RESIDENT, MODE_SAFE, VNPopulation
 
 REGION_RZ, REGION_EZ, REGION_TZ = 0, 1, 2
 REGION_NAMES = ("RZ", "EZ", "TZ")
-RZ_BUDGET_BYTES = 300 * 1024 * 1024
-EZ_BUDGET_BYTES = 500 * 1024 * 1024
+
+NO_TRIGGER = -1.0
 
 
 @dataclass
-class RegionState:
-    """Per-slot region bookkeeping layered over a fixed-size population."""
-    n: int
-    active: np.ndarray          # bool [N]: resident in RZ or loaded in EZ
-    region: np.ndarray          # uint8 [N]
-    frozen: np.ndarray          # bool [N]: FVN, never mutated
-    trigger_at: np.ndarray      # float64 [N]: TVN firing step, -1 = none
-    trigger_value: np.ndarray   # float32 [N]
-    fired: np.ndarray           # bool [N]
-    e_std: float = 0.05
-    loaded_count: int = 0
-    released_count: int = 0
-    overflow_count: int = 0
-    triggered_count: int = 0
+class RegionManager:
+    pop: VNPopulation
+    pool: np.ndarray = field(init=False)        # EVN ids not currently loaded
+    ez_ids: np.ndarray = field(init=False)      # EVN ids currently in EZ
+    trigger_at: np.ndarray = field(init=False)  # float32 [N], NO_TRIGGER = none
+    threshold: float = 0.0                      # EZ release threshold
+    e_std: float = 0.05                         # sliding estimate
+    loads: int = 0
+    releases: int = 0
+    fired: int = 0
 
-    @property
-    def mutable(self) -> np.ndarray:
-        """Slots the update equations are allowed to write to."""
-        return self.active & ~self.frozen
+    def __post_init__(self) -> None:
+        self.pool = np.empty(0, dtype=np.int64)
+        self.ez_ids = np.empty(0, dtype=np.int64)
+        self.trigger_at = np.full(self.pop.n, NO_TRIGGER, dtype=np.float32)
 
-    def bytes_rz(self, per_slot: int) -> int:
-        k = int(np.count_nonzero(self.active & (self.region == REGION_RZ)))
-        return k * per_slot
+    # --- neuron kinds -------------------------------------------------
+    def mark_fvn(self, ids: np.ndarray, mode: int = MODE_SAFE) -> None:
+        ids = np.asarray(ids, dtype=np.int64)
+        self.pop.frozen[ids] = True
+        self.pop.mode[ids] = mode
+        self.pop.region[ids] = REGION_RZ
 
-    def bytes_ez(self, per_slot: int) -> int:
-        k = int(np.count_nonzero(self.active & (self.region == REGION_EZ)))
-        return k * per_slot
+    def mark_evn(self, ids: np.ndarray, mode: int = MODE_BACKGROUND) -> None:
+        ids = np.asarray(ids, dtype=np.int64)
+        self.pop.frozen[ids] = False
+        self.pop.mode[ids] = mode
+        self.pool = np.union1d(self.pool, ids)
 
-    def update_e_std(self, energy: np.ndarray) -> None:
-        live = energy[self.active]
-        if live.size == 0:
-            return
-        v = float(np.std(live))
-        if np.isfinite(v) and v > 0.0:
-            self.e_std = v
+    def set_timer(self, ids: np.ndarray, at: np.ndarray) -> None:
+        ids = np.asarray(ids, dtype=np.int64)
+        self.trigger_at[ids] = np.asarray(at, dtype=np.float32)
 
-    def overflow_mask(self, energy: np.ndarray, e_target: float) -> np.ndarray:
-        thr = e_target + 2.0 * self.e_std
-        return self.active & (self.region == REGION_RZ) & (energy > thr)
+    # --- thresholds ---------------------------------------------------
+    def update_threshold(self, e_target: float = 0.3, mult: float = 1.5) -> float:
+        """Release threshold from the empirical low tail: P10 * mult.
 
-    def maybe_load(self, pop, e_target: float) -> int:
-        """Load inactive slots into EZ when RZ boundary neurons run hot."""
-        hot = self.overflow_mask(pop.energy, e_target)
-        if not hot.any():
-            return 0
-        self.overflow_count += 1
-        free = np.flatnonzero(~self.active)
-        if free.size == 0:
-            return 0
-        k = int(min(free.size, max(1, int(np.count_nonzero(hot)))))
-        pick = free[:k]
-        self.active[pick] = True
-        self.region[pick] = REGION_EZ
-        pop.mode[pick] = MODE_ACTIVE
-        pop.energy[pick] = np.float32(e_target * 0.5)
-        pop.state[pick] = 0.0
-        self.loaded_count += k
-        return k
-
-    def maybe_release(self, energy: np.ndarray) -> int:
-        """Release EZ slots sitting in the bottom decile of the live field.
-
-        The threshold tracks the empirical P10 rather than a closed form,
-        because the steady-state band is set by e_target and kappa and a fixed
-        formula cannot know where the lower tail actually lands.
+        A fixed ``e_target - 2*e_std`` never fires in steady state because the
+        distribution never reaches that low; tracking the realised P10 keeps
+        the threshold attached to the distribution that is actually there.
         """
-        ez = np.flatnonzero(self.active & (self.region == REGION_EZ))
-        if ez.size == 0:
-            return 0
-        live = energy[self.active]
-        thr = float(np.percentile(live, 10)) * 1.5
-        cold = ez[energy[ez] < thr]
-        if cold.size == 0:
-            return 0
-        self.active[cold] = False
-        self.released_count += int(cold.size)
-        return int(cold.size)
+        e = self.pop.energy
+        self.e_std = float(e.std())
+        self.threshold = float(np.percentile(e, 10) * mult)
+        return self.threshold
 
-    def fire_timers(self, pop, step: int) -> int:
-        """TVN: at trigger_at, push energy in and let the wave carry it out."""
-        due = ((self.trigger_at >= 0.0) & (self.trigger_at <= step)
-               & self.active & ~self.fired)
-        if not due.any():
+    def overflow_ids(self, e_target: float = 0.3, k: float = 2.0) -> np.ndarray:
+        """RZ neurons whose energy pushed past the band -> ask EZ for help."""
+        cut = e_target + k * self.e_std
+        in_rz = self.pop.region == REGION_RZ
+        return np.flatnonzero(in_rz & (self.pop.energy > cut))
+
+    # --- load / release -----------------------------------------------
+    def load(self, count: int) -> int:
+        count = int(min(count, self.pool.size))
+        if count <= 0:
             return 0
-        idx = np.flatnonzero(due)
-        pop.energy[idx] += self.trigger_value[idx]
-        self.fired[idx] = True
-        self.triggered_count += int(idx.size)
-        return int(idx.size)
+        ids = self.pool[:count]
+        self.pool = self.pool[count:]
+        self.ez_ids = np.union1d(self.ez_ids, ids)
+        self.pop.region[ids] = REGION_EZ
+        self.loads += int(ids.size)
+        return int(ids.size)
+
+    def release(self) -> int:
+        if self.ez_ids.size == 0:
+            return 0
+        quiet = self.ez_ids[self.pop.energy[self.ez_ids] < self.threshold]
+        if quiet.size == 0:
+            return 0
+        self.ez_ids = np.setdiff1d(self.ez_ids, quiet)
+        self.pool = np.union1d(self.pool, quiet)
+        self.pop.region[quiet] = REGION_RZ
+        self.releases += int(quiet.size)
+        return int(quiet.size)
+
+    # --- timers -------------------------------------------------------
+    def tick_timers(self, t: float, energy: float = 0.5) -> np.ndarray:
+        """Fire every TVN whose clock has come due.  Returns the ids fired."""
+        due = np.flatnonzero((self.trigger_at >= 0.0) & (self.trigger_at <= t))
+        if due.size == 0:
+            return due
+        self.trigger_at[due] = NO_TRIGGER
+        self.pop.energy[due] += np.float32(energy)
+        self.fired += int(due.size)
+        return due
+
+    def stats(self) -> dict:
+        return {
+            "pool": int(self.pool.size),
+            "ez_loaded": int(self.ez_ids.size),
+            "loads": self.loads,
+            "releases": self.releases,
+            "timers_fired": self.fired,
+            "threshold": round(self.threshold, 4),
+            "e_std": round(self.e_std, 4),
+            "fvn": int(self.pop.frozen.sum()),
+        }
 
 
-def make_regions(n: int, n_rz: int, seed: int = 0,
-                 n_fvn: int = 0, n_tvn: int = 0) -> RegionState:
-    """RZ holds slots [0, n_rz); the rest are dormant EVN pool slots."""
-    rng = np.random.default_rng(seed + 991)
-    active = np.zeros(n, dtype=bool)
-    active[:n_rz] = True
-    region = np.full(n, REGION_RZ, dtype=np.uint8)
-    region[n_rz:] = REGION_EZ
-    frozen = np.zeros(n, dtype=bool)
-    if n_fvn > 0:
-        frozen[:n_fvn] = True
-    trigger_at = np.full(n, -1.0, dtype=np.float64)
-    if n_tvn > 0:
-        start = n_fvn
-        trigger_at[start:start + n_tvn] = rng.integers(
-            500, 5000, size=n_tvn).astype(np.float64)
-    return RegionState(
-        n=n, active=active, region=region, frozen=frozen,
-        trigger_at=trigger_at,
-        trigger_value=np.full(n, 0.5, dtype=np.float32),
-        fired=np.zeros(n, dtype=bool),
-    )
+def split_resident(n: int, n_rz: int, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministic split of ids into a resident part and the rest."""
+    rng = np.random.default_rng(seed)
+    ids = rng.permutation(n)
+    return np.sort(ids[:n_rz]), np.sort(ids[n_rz:])
