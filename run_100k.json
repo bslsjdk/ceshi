@@ -1,0 +1,106 @@
+{
+  "steps": 100000,
+  "wall_s": 77.3,
+  "us_per_step": 772.7,
+  "rss_mb": 19.4,
+  "arrays_mb": 2.631,
+  "nan": false,
+  "e_max": 0.4984,
+  "e_mean": 0.2932,
+  "e_std": 0.064,
+  "top_frac": 0.0,
+  "bn_corr": 0.0025,
+  "bn_out_std": 0.062499,
+  "loads": 944,
+  "releases": 940,
+  "fired": 5,
+  "cull_rate": 0.4,
+  "cull_rounds": 49,
+  "cull_events": 19600,
+  "reinit": 19600,
+  "bn_alive": 516,
+  "hibernate": {
+    "size": 272142,
+    "ratio": 1.088,
+    "load_s": 0.0007,
+    "energy_eq": true,
+    "phase_eq": true,
+    "state_eq": true,
+    "ada_eq": true
+  },
+  "archive": {
+    "size": 56544,
+    "ratio": 5.235,
+    "load_s": 0.0003,
+    "energy_eq": false,
+    "phase_eq": false,
+    "state_eq": false,
+    "ada_eq": false
+  },
+  "d5": {
+    "rollback_ok": true,
+    "switch_s": 0.0004,
+    "rss_delta_mb": 0.0
+  },
+  "score": {
+    "score_std": 0.1648,
+    "score_mean": 0.694,
+    "mse_drop": 0.5665,
+    "between_zone_std": 0.016302019357681274,
+    "within_zone_std": 0.031358636915683746
+  },
+  "stage5b": {
+    "merged_rz": 389,
+    "merged_ez": 95,
+    "culled": 0,
+    "merge_rate": 0.484,
+    "cull_rate": 0.0
+  },
+  "history": [
+    {
+      "step": 20000,
+      "R": 0.05658956617116928,
+      "e_mean": 0.29188889265060425,
+      "e_std": 0.06510116904973984,
+      "loads": 174,
+      "releases": 172,
+      "fired": 5
+    },
+    {
+      "step": 40000,
+      "R": 0.09371927380561829,
+      "e_mean": 0.2939468026161194,
+      "e_std": 0.06489134579896927,
+      "loads": 343,
+      "releases": 343,
+      "fired": 5
+    },
+    {
+      "step": 60000,
+      "R": 0.13863661885261536,
+      "e_mean": 0.2924230694770813,
+      "e_std": 0.06452376395463943,
+      "loads": 549,
+      "releases": 547,
+      "fired": 5
+    },
+    {
+      "step": 80000,
+      "R": 0.04816635698080063,
+      "e_mean": 0.29085421562194824,
+      "e_std": 0.06323664635419846,
+      "loads": 750,
+      "releases": 747,
+      "fired": 5
+    },
+    {
+      "step": 100000,
+      "R": 0.030431676656007767,
+      "e_mean": 0.2931932508945465,
+      "e_std": 0.06400514394044876,
+      "loads": 944,
+      "releases": 940,
+      "fired": 5
+    }
+  ]
+}

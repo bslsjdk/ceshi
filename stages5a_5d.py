@@ -9,17 +9,19 @@ from __future__ import annotations
 import numpy as np
 
 from vn_mobile.core.neuron import DIM, MODE_SAFE, build_population
+from vn_mobile.core.cull import CULL_ROUND_STEPS, relative_round
 from vn_mobile.core.regions import REGION_RZ, RegionManager, split_resident
-from vn_mobile.core.trial import make_trial_zone, tick_trial, zone_of_main
+from vn_mobile.core.tzbuild import make_trial_zone, tick_trial, zone_of_main
 from vn_mobile.core.update import E_TARGET, step_energy, step_phase, step_state
 from vn_mobile.io import vnpkg
 from stages5cd import run_5c, run_5d
 
-# Prediction horizon in BN samples (one sample every 10 ticks).  Predicting the
-# very next sample is too easy: every BN nails it, scores saturate and the
-# merge rate collapses to 0%.  5 samples = 50 ticks makes the task hard enough
-# that BN quality actually separates.
-HORIZON = 5
+# Prediction lag in BN samples (one sample every 10 ticks).  Predicting the very
+# next sample is too easy: every BN nails it, scores saturate and the merge rate
+# collapses to 0%.  Each zone now predicts a DIFFERENT number of ticks ahead --
+# zone 0 -> 25 ticks, zone 19 -> 120 -- so difficulty, and therefore score,
+# varies between zones and not only within them.
+SAMPLE_EVERY = 10
 
 
 def setup_regions(pop, n_rz: int = 300, n_fvn: int = 50, n_tvn: int = 5,
@@ -36,7 +38,8 @@ def setup_regions(pop, n_rz: int = 300, n_fvn: int = 50, n_tvn: int = 5,
 
 def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
            n_zones: int = 20, seed: int = 0, log_every: int = 10000,
-           n_rz: int = 300, forced_pulse: float = 0.0):
+           n_rz: int = 300, forced_pulse: float = 0.0,
+           lr: float | None = None, amp_lo: float = 0.2, amp_hi: float = 1.5):
     """``forced_pulse`` > 0 holds RZ neurons hot so EZ overflow fires.
 
     It is applied every tick, not on pulse ticks: a one-shot injection decays
@@ -48,6 +51,10 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
     rs, rz_ids = setup_regions(pop, n_rz=n_rz, seed=seed)
     tz = make_trial_zone(n_bn=n_bn, n_main=n_main, n_zones=n_zones,
                          seed=seed + 3, main_addr=pop.addr)
+    if lr is not None:
+        tz.lr = float(lr)
+    if lr is not None:
+        tz.lr = float(lr)
     inj_e = np.zeros(n_main, dtype=np.float32)
     inj_h = np.zeros((n_main, DIM), dtype=np.float32)
     fz = np.flatnonzero(pop.frozen)
@@ -55,11 +62,14 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
     # are genuinely harder to predict.  Without it every BN faces the same
     # task and scores identically.
     zm = zone_of_main(pop.addr, n_zones)
-    amp = rng.uniform(0.2, 1.5, size=n_zones).astype(np.float32)
+    amp = rng.uniform(amp_lo, amp_hi, size=n_zones).astype(np.float32)
     hot = np.setdiff1d(rz_ids, np.flatnonzero(pop.frozen))[:20]
-    buf = np.zeros((HORIZON, n_bn), dtype=np.float32)
+    max_hz = int(tz.hz_bn.max()) + 1      # ring must exceed the longest lag
+    buf = np.zeros((max_hz, n_bn), dtype=np.float32)
+    bn_idx = np.arange(n_bn)
     hpos = filled = 0
     hist, mse0, mse_last, ov_total = [], None, float("nan"), 0
+    cull_log = []
 
     for t in range(steps):
         rs.tick_timers(float(t))
@@ -71,13 +81,14 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
         # FVN slots must come out bit-identical.
         pop.energy[fz], pop.phase[fz], pop.state[fz] = fe, fp, fs
         if t % 1000 == 0:
-            tz.promote_or_cull()
             rs.update_threshold(E_TARGET)
             ov = rs.overflow_ids(E_TARGET)
             ov_total += int(ov.size)
             if ov.size:
                 rs.load(ov.size)
             rs.release()
+        if t > 0 and t % CULL_ROUND_STEPS == 0:
+            cull_log.append(relative_round(tz, rng))
         # Pulse every 200 ticks: with no input the state layer decays to 0 and
         # there is nothing for the BN output to be compared against.
         inj_e[:] = 0.0
@@ -90,19 +101,19 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
             inj_e[:] = rng.normal(0.0, 0.01, size=n_main) * amp[zm]
         if forced_pulse > 0.0:
             inj_e[hot] = forced_pulse
-        if t % 10 == 0:
+        if t % SAMPLE_EVERY == 0:
             cur = tz.shadow_energy(pop.energy)
             buf[hpos] = cur
-            hpos = (hpos + 1) % HORIZON
+            hpos = (hpos + 1) % max_hz
             filled += 1
-            if filled > HORIZON:
-                old = buf[hpos]          # oldest sample = prediction input
-                base = float(np.mean(cur ** 2))
+            if filled > max_hz:
+                # Per-BN lag: buf[(hpos-1-hz) % max_hz] is that BN's input.
+                old = buf[(hpos - 1 - tz.hz_bn) % max_hz, bn_idx]
                 loss = tz.train_step(old, cur)
                 if mse0 is None:
                     mse0 = loss
                 mse_last = loss
-                tz.evaluate(old, cur, baseline_err=base)
+                tz.evaluate(old, cur)
         tick_trial(tz, rng)
         if log_every and (t + 1) % log_every == 0:
             hist.append(dict(step=t + 1, R=_R_live(pop),
@@ -110,7 +121,13 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
                              e_std=float(pop.energy.std()),
                              loads=rs.loads, releases=rs.releases,
                              fired=rs.fired))
+    # Promotion is a single terminal decision, not a rolling one: promoting
+    # every round is cumulative, so the merge rate marches to ~50% no matter
+    # what the threshold is.  Evaluated once, it is the fraction of BNs that
+    # actually cleared the bar at the end of the trial.
+    tz.promote_or_cull()
     tz.mse0, tz.mse_last = mse0, mse_last
+    tz.cull_log = cull_log
     return pop, rs, tz, hist, ov_total
 
 

@@ -12,7 +12,9 @@ from stages5a_5d import bn_distinct, run_5a, run_5b, setup_regions
 from stages5cd import run_5c, run_5d
 from vn_mobile.core.neuron import DIM, build_population
 from vn_mobile.core.regions import REGION_EZ, REGION_RZ, RegionManager
-from vn_mobile.core.trial import CULL_WINDOW, make_trial_zone, zone_of_main
+from vn_mobile.core.cull import relative_round
+from vn_mobile.core.trial import CULL_WINDOW
+from vn_mobile.core.tzbuild import make_trial_zone, zone_of_main
 from vn_mobile.core.update import E_TARGET, step_energy, step_phase
 
 
@@ -48,20 +50,34 @@ def test_bn_dynamics_are_perturbed_per_neuron():
     assert tz.pop.omega.std() > 0.1          # not a single shared value
 
 
-# --- 5A: culling is proportional, not an absolute step count ------------
-def test_cull_uses_window_share_not_absolute_steps():
-    tz = make_trial_zone(n_bn=10, n_main=100, n_zones=10, seed=5)
-    # 0.5 is neither low nor promotable, so it isolates the cull path.
-    tz.score[:] = 0.5                        # evaluate() recomputes score, so
-    for _ in range(CULL_WINDOW):             # sample the window directly here
-        tz._sample_cull_window()
-    assert tz.promote_or_cull()[2] == 0      # never low -> no cull
-    assert bool((tz.merged == 0).all())      # and nothing promoted either
+# --- 5A: culling is relative (worst 40% of each zone) ------------------
+def test_relative_cull_takes_worst_40pct_of_each_zone():
+    tz = make_trial_zone(n_bn=100, n_main=200, n_zones=10, seed=5)
+    rng = np.random.default_rng(0)
+    tz.score[:] = rng.uniform(0.0, 1.0, size=100)
+    before = tz.score.copy()
+    r = relative_round(tz, rng)
+    assert r["culled"] == 40                 # 40% of 100
+    assert abs(r["cull_rate"] - 0.4) < 1e-6
+    assert int((tz.merged == 0).sum()) == 100     # reinitialised, not removed
+    # Culled slots are exactly the bottom 40% by score inside each zone.
+    for u in np.unique(tz.zone_id):
+        m = np.flatnonzero(tz.zone_id == u)
+        assert m.size == 10
+        order = m[np.argsort(before[m])]
+        assert set(order[:4].tolist()) == set(np.flatnonzero(tz.score == 0.0)
+                                              ).intersection(m.tolist())
+    assert tz.reinit_count == 40
 
-    tz.score[:] = 0.1                        # low for just over half the window
-    for _ in range(int(CULL_WINDOW * 0.6)):
-        tz._sample_cull_window()
-    assert tz.promote_or_cull()[2] == 10
+
+def test_relative_cull_keeps_population_size():
+    tz = make_trial_zone(n_bn=200, n_main=200, n_zones=10, seed=6)
+    rng = np.random.default_rng(1)
+    for _ in range(5):
+        tz.score[:] = rng.uniform(0.0, 1.0, size=200)
+        relative_round(tz, rng)
+    assert tz.pop.n == 200
+    assert int((tz.merged == 0).sum()) == 200
 
 
 # --- 4/5A: regions, FVN, TVN -------------------------------------------

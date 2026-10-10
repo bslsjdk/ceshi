@@ -3,12 +3,14 @@
 A BN is NOT a copy of a main VN: it lives in TZ with its own adjacency and only
 sees the main field through a shadow projection.
 
-Stage 5A rerun -- spatial division of labour.  First pass had all BNs watching
-one global aggregate, so they scored identically and the 5%-20% merge rate was
-impossible: promotion was all-or-nothing.  The main system is now split into
-``n_zones`` address blocks, each BN shadows one block, and each BN gets its own
-dynamics (omega, kappa, sigma_w).  Culling is proportional (share of a sliding
-window below threshold), not an absolute step count.
+Stage 5A final -- spatial division of labour + heterogeneous horizon.  BNs
+watch one address block each and every zone predicts a *different* number of
+ticks ahead, so cross-zone score spread exceeds within-zone spread.
+
+Scoring follows the agreed fix: ``acc = 1/(1+50*se)`` (10 was too flat) and the
+utilisation gate is the running median of ``|pred|`` rather than a fixed 0.05
+that every BN cleared.  Culling is relative (worst 40% of each zone) because an
+absolute threshold needs absolute failures, and none exist.
 """
 from __future__ import annotations
 
@@ -16,13 +18,17 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .neuron import DIM, MODE_TRIAL, VNPopulation, build_population
+from .neuron import DIM, VNPopulation
 from .update import step_energy, step_phase
 
 TZ_BUDGET_BYTES = 100 * 1024 * 1024
 CULL_WINDOW = 2000      # samples kept for the proportional cull test
 CULL_LOW_FRAC = 0.5     # cull when score<0.3 for more than half the window
 LOW_THRESHOLD = 0.3
+ACC_COEF = 50.0         # 1/(1+10*se) was too flat to separate BNs
+CULL_FRAC = 0.40        # relative: worst 40% of each zone, every 2000 steps
+BASE_HORIZON = 50       # ticks; zone i uses BASE_HORIZON*(0.5+0.1*i)
+SAMPLE_EVERY = 10       # ticks between stored shadow samples
 
 
 @dataclass
@@ -42,7 +48,11 @@ class TrialZone:
     ring_pos: int
     zero_util_steps: np.ndarray  # int32 [N_bn]
     merged: np.ndarray       # int8 [N_bn] 0=trial 1=EZ 2=RZ -1=culled
-    lr: float = 5e-3
+    hz_bn: np.ndarray        # int32 [N_bn] prediction lag in samples
+    cull_events: int = 0     # cumulative relative culls
+    cull_rounds: int = 0     # how many 2000-step rounds have run
+    reinit_count: int = 0
+    lr: float = 3e-2
 
     def shadow_energy(self, main_energy: np.ndarray) -> np.ndarray:
         return main_energy[self.shadow].mean(axis=1)
@@ -69,7 +79,10 @@ class TrialZone:
         pred = p.scale * t.mean(axis=1)
         err = (pred - target).astype(np.float32)
 
-        dout = ((2.0 * err / p.n) / DIM)[:, None] * p.scale[:, None]
+        # Each BN owns its own adapters, so this is N independent losses, not
+        # one batched loss -- dividing by p.n made the gradient ~1e-7 and lr had
+        # literally no effect across two orders of magnitude.
+        dout = (2.0 * err / DIM)[:, None] * p.scale[:, None]
         dz = dout * (1.0 - t * t)                                   # [N, DIM]
         grad_b = dz[:, :, None] * u[:, None, :]                     # [N, DIM, R]
         du = np.matmul(np.transpose(p.adapter_b, (0, 2, 1)),
@@ -80,23 +93,38 @@ class TrialZone:
         p.adapter_a -= (self.lr * grad_a).astype(np.float32)
         return float(np.mean(err ** 2))
 
-    def evaluate(self, prev_shadow: np.ndarray, target: np.ndarray,
-                 baseline_err: float) -> None:
+    def evaluate(self, prev_shadow: np.ndarray, target: np.ndarray) -> None:
         """Stage 5B score + cull-window sample; same prev->current pair as train."""
         pred = self._predict(prev_shadow)
         act = np.abs(pred)
         se = (pred - target) ** 2
-        acc = 1.0 / (1.0 + 10.0 * se)
-        contrib = np.maximum(0.0, baseline_err - se) / (baseline_err + 1e-9)
-        self.util = 0.99 * self.util + 0.01 * (act > 0.05).astype(np.float32)
+        acc = 1.0 / (1.0 + ACC_COEF * se)
+        # Per-BN baseline: squared error of a zero predictor for THIS zone.
+        base = (target * target).astype(np.float32)
+        contrib = np.maximum(0.0, base - se) / (base + 1e-6)
+        # Utilisation gate tracks the running median, not a fixed constant that
+        # every BN cleared at once (which made util std exactly 0).
+        gate = float(np.median(act)) if act.size else 0.0
+        self.util = 0.99 * self.util + 0.01 * (act > gate).astype(np.float32)
         # Variance, not magnitude: scoring |pred| punishes a BN for being
         # accurate, because a well-trained BN necessarily has a larger output.
         self.pred_mean = 0.99 * self.pred_mean + 0.01 * pred
         self.stab = 0.99 * self.stab + 0.01 * (pred * pred)
         var = np.maximum(0.0, self.stab - self.pred_mean ** 2)
         stab_score = 1.0 / (1.0 + var)
+        # The two penalty terms the spec lists and the first pass silently
+        # dropped (both constant 0.0), which is why every score sat at ~0.72.
+        # cost = output magnitude; conflict = distance from this zone's
+        # consensus prediction, i.e. how much the BN disagrees with its peers.
+        cost = np.clip(act, 0.0, 1.0)
+        med = np.zeros_like(pred)
+        for u in np.unique(self.zone_id):
+            m = self.zone_id == u
+            med[m] = float(np.median(pred[m])) if m.any() else 0.0
+        conflict = np.clip(np.abs(pred - med) / (np.abs(med) + 1e-6), 0.0, 1.0)
         self.score = (0.4 * acc + 0.2 * self.util + 0.2 * contrib
-                      + 0.1 * stab_score).astype(np.float32)
+                      + 0.1 * stab_score - 0.05 * cost
+                      - 0.05 * conflict).astype(np.float32)
 
         self._sample_cull_window()
 
@@ -108,17 +136,15 @@ class TrialZone:
         self.ring_pos = (self.ring_pos + 1) % CULL_WINDOW
 
     def promote_or_cull(self) -> tuple[int, int, int]:
-        """Score>0.85 -> RZ, >0.7 -> EZ, low for >50% of window -> cull."""
-        s, u = self.score, self.util <= 1e-6
-        self.zero_util_steps = np.where(u, self.zero_util_steps + 1, 0)
-        need = int(CULL_WINDOW * CULL_LOW_FRAC)
+        """Score>0.85 -> RZ, >0.7 -> EZ.  Culling is relative; see cull.py."""
+        s = self.score
+        self.zero_util_steps = np.where(self.util <= 1e-6,
+                                        self.zero_util_steps + 1, 0)
         to_rz = np.flatnonzero((s > 0.85) & (self.merged == 0))
         to_ez = np.flatnonzero((s > 0.7) & (s <= 0.85) & (self.merged == 0))
-        cull = np.flatnonzero((self.low_count > need) & (self.merged == 0))
         self.merged[to_rz] = 2
         self.merged[to_ez] = 1
-        self.merged[cull] = -1
-        return int(to_rz.size), int(to_ez.size), int(cull.size)
+        return int(to_rz.size), int(to_ez.size), 0
 
     def zone_stats(self) -> dict:
         """Between-zone vs within-zone score spread (division of labour)."""
@@ -130,71 +156,3 @@ class TrialZone:
         within = np.mean([self.score[alive & (z == u)].std() for u in ids])
         return {"between_zone_std": float(means.std()),
                 "within_zone_std": float(within)}
-
-def zone_of_main(main_addr: np.ndarray, n_zones: int) -> np.ndarray:
-    """Split the main system into contiguous address blocks."""
-    n = main_addr.shape[0]
-    order = np.argsort(main_addr, kind="stable")
-    z = np.empty(n, dtype=np.int64)
-    z[order] = (np.arange(n) * n_zones) // n
-    return z
-
-
-def make_trial_zone(n_bn: int = 1000, n_main: int = 1000, n_zones: int = 20,
-                    k_shadow: int = 8, degree: int = 6, seed: int = 7,
-                    main_addr: np.ndarray | None = None) -> TrialZone:
-    """BNs get their own graph, their own zone, and their own dynamics."""
-    rng = np.random.default_rng(seed)
-    if main_addr is None:
-        main_addr = np.arange(n_main, dtype=np.int64)
-    zm = zone_of_main(np.asarray(main_addr), n_zones)
-
-    per_zone_bn = max(1, n_bn // n_zones)
-    zone_id = np.minimum(np.arange(n_bn) // per_zone_bn, n_zones - 1)
-
-    shadow = np.zeros((n_bn, k_shadow), dtype=np.int32)
-    for u in range(n_zones):
-        members = np.flatnonzero(zm == u)
-        pick = np.flatnonzero(zone_id == u)
-        if members.size == 0 or pick.size == 0:
-            continue
-        rep = members.size < k_shadow
-        shadow[pick] = [rng.choice(members, k_shadow, replace=rep) for _ in pick]
-
-    pop = build_population(n=n_bn, degree=degree, seed=seed,
-                           mode=MODE_TRIAL, health=8)
-    pop.energy[:] = rng.uniform(0.0, 0.02, size=n_bn).astype(np.float32)
-    pop.region[:] = 2
-
-    # omega is per-neuron already; kappa rides on the zone, sigma_w is folded
-    # into the edge weights (wedge = w*d).
-    kappa = rng.uniform(0.1, 0.2, size=n_bn).astype(np.float32)
-    sigma_w = rng.uniform(0.2, 0.4, size=n_bn).astype(np.float32)
-    pop.omega = (rng.normal(0.0, 1.0, size=n_bn)
-                 * rng.uniform(0.3, 0.7, size=n_bn)).astype(np.float32)
-    base = float(np.abs(pop.weight).mean())
-    if base > 0:
-        pop.weight = (pop.weight / base) * sigma_w[pop.src]
-        pop.weight -= pop.weight.mean()
-        pop.wedge = (pop.weight * pop.dir_cos).astype(np.float32)
-
-    return TrialZone(
-        pop=pop, shadow=shadow, zone_id=zone_id.astype(np.int32),
-        kappa=kappa, sigma_w=sigma_w,
-        score=np.zeros(n_bn, dtype=np.float32),
-        util=np.zeros(n_bn, dtype=np.float32),
-        stab=np.zeros(n_bn, dtype=np.float32),
-        pred_mean=np.zeros(n_bn, dtype=np.float32),
-        prev_shadow=np.zeros(n_bn, dtype=np.float32),
-        low_count=np.zeros(n_bn, dtype=np.int32),
-        low_ring=np.zeros((CULL_WINDOW, n_bn), dtype=bool),
-        ring_pos=0,
-        zero_util_steps=np.zeros(n_bn, dtype=np.int32),
-        merged=np.zeros(n_bn, dtype=np.int8),
-    )
-
-
-def tick_trial(tz: TrialZone, rng: np.random.Generator) -> None:
-    """Keep the TZ wave field alive; per-BN kappa gives each BN its own gain."""
-    step_energy(tz.pop, rng, kappa=tz.kappa)
-    step_phase(tz.pop)
