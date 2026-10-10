@@ -1,0 +1,42 @@
+{
+ "src": {
+  "items": 15880,
+  "bytes": 63520,
+  "per_vn": 63.5
+ },
+ "dst": {
+  "items": 15880,
+  "bytes": 63520,
+  "per_vn": 63.5
+ },
+ "weight": {
+  "items": 15880,
+  "bytes": 63520,
+  "per_vn": 63.5
+ },
+ "dir_cos": {
+  "items": 15880,
+  "bytes": 63520,
+  "per_vn": 63.5
+ },
+ "wedge": {
+  "items": 15880,
+  "bytes": 63520,
+  "per_vn": 63.5
+ },
+ "ptr": {
+  "items": 1001,
+  "bytes": 8008,
+  "per_vn": 8.0
+ },
+ "_total_adj": {
+  "bytes": 325608,
+  "per_vn": 325.6
+ },
+ "_full_pop": {
+  "bytes": 681896,
+  "per_vn": 681.9
+ },
+ "_E": 15880,
+ "_deg": 8
+}
