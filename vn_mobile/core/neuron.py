@@ -30,7 +30,8 @@ class VNPopulation:
     route_key: np.ndarray   # uint32 [N]
     adapter_ref: np.ndarray  # uint32 [N]
     energy: np.ndarray      # float32 [N]
-    phase: np.ndarray       # float32 [N] radians, frozen in stage 1
+    phase: np.ndarray       # float32 [N] radians, Kuramoto-driven in stage 2
+    omega: np.ndarray       # float32 [N] intrinsic frequency
     mode: np.ndarray        # uint8 [N]
     health: np.ndarray      # uint8 [N]
     direction: np.ndarray   # float32 [N, DIM]
@@ -41,7 +42,7 @@ class VNPopulation:
     dst: np.ndarray         # int32 [E]
     weight: np.ndarray      # float32 [E]  w_ij
     dir_cos: np.ndarray     # float32 [E]  d_ij
-    kedge: np.ndarray       # float32 [E]  w*d*cos(dphi), phase frozen
+    wedge: np.ndarray       # float32 [E]  w_ij*d_ij, phase-independent part
     deg: np.ndarray         # float32 [N]
     W: np.ndarray           # float32 [DIM, DIM]
     bias: np.ndarray        # float32 [DIM]
@@ -85,7 +86,8 @@ def _random_edges(n: int, degree: int, rng: np.random.Generator):
 def build_population(n: int = 1000, degree: int = 8, seed: int = 0,
                      mode: int = MODE_BACKGROUND,
                      health: int = 16,
-                     weight_sigma: float = 0.1) -> VNPopulation:
+                     weight_sigma: float = 0.1,
+                     omega_std: float = 0.1) -> VNPopulation:
     """Create a population with a random degree-``degree`` graph.
 
     Weight mean is exactly 0 (centred) so no systematic positive feedback can
@@ -106,7 +108,9 @@ def build_population(n: int = 1000, degree: int = 8, seed: int = 0,
     dir_cos = dir_cos.astype(np.float32)
 
     phase = rng.uniform(0.0, TWO_PI, size=n).astype(np.float32)
-    kedge = (weight * dir_cos * np.cos(phase[dst] - phase[src])).astype(np.float32)
+    # cos(phi_j - phi_i) is now dynamic, so only the static w*d factor is
+    # precomputed; the phase factor is applied per tick in step_energy.
+    wedge = (weight * dir_cos).astype(np.float32)
 
     deg = np.bincount(src, minlength=n).astype(np.float32)
     ptr = np.concatenate([[0], np.cumsum(deg)]).astype(np.int64)
@@ -118,12 +122,13 @@ def build_population(n: int = 1000, degree: int = 8, seed: int = 0,
         adapter_ref=np.arange(n, dtype=np.int64).astype(np.uint32),
         energy=rng.uniform(0.0, 0.2, size=n).astype(np.float32),
         phase=phase,
+        omega=rng.normal(0.0, omega_std, size=n).astype(np.float32),
         mode=np.full(n, mode, dtype=np.uint8),
         health=np.full(n, health, dtype=np.uint8),
         direction=direction,
         state=np.zeros((n, DIM), dtype=np.float32),
         scale=np.ones(n, dtype=np.float32),
-        ptr=ptr, src=src, dst=dst, weight=weight, dir_cos=dir_cos, kedge=kedge,
+        ptr=ptr, src=src, dst=dst, weight=weight, dir_cos=dir_cos, wedge=wedge,
         deg=deg,
         W=(rng.normal(0.0, 1.0 / np.sqrt(DIM), size=(DIM, DIM))).astype(np.float32),
         bias=np.zeros(DIM, dtype=np.float32),
