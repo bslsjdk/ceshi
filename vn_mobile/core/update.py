@@ -1,25 +1,38 @@
 """One-tick update equations for the virtual neuron field.
 
-Energy:
+Energy (stage 2: added the lambda*e_target restoring term):
     g_i   = sum_j w_ij * e_j * cos(phi_j - phi_i) * d_ij
-    e_i'  = (1-lam) * e_i + kappa * tanh(g_i / sqrt(deg_i)) + eta
+    e_i'  = (1-lam)*e_i + lam*e_target + kappa*tanh(g_i/sqrt(deg_i)) + eta
+
+Phase (stage 2, Kuramoto):
+    phi_i'= phi_i + omega_i + (K/deg_i) * sum_j sin(phi_j - phi_i)
 
 State:
     x_i   = I_i + (1/deg_i) * sum_j h_j
     h_i'  = alpha * h_i + (1-alpha) * tanh(W x_i + b + B A x_i)
     y_i   = s_i * h_i * e_i
+
+Without the restoring term the energy map has a transcritical bifurcation at
+sigma = lam/kappa: below it the only fixed point is e*=0 (dead), above it the
+map runs away (explodes).  lam*e_target removes the bifurcation and puts the
+fixed point at e* ~ e_target for the whole parameter space.
 """
 from __future__ import annotations
 
 import numpy as np
 
-from .neuron import VNPopulation
+from .neuron import TWO_PI, VNPopulation
 
-LAMBDA = 0.05
-KAPPA = 0.3
+LAMBDA = 0.1
+KAPPA = 0.05
+E_TARGET = 0.3
 ETA_STD = 0.001
 ALPHA = 0.9
-ENERGY_CAP = 0.3      # target mean energy used by the global constraint
+K_COUPLING = 0.5
+# Safety net only.  With the restoring term the mean sits at e_target, so a
+# cap at 0.3 would fire constantly and mask what we are trying to measure;
+# 1.0 lets the field run freely and only catches genuine runaway.
+ENERGY_CAP = 1.0
 
 
 def aggregate(pop: VNPopulation, values: np.ndarray) -> np.ndarray:
@@ -53,15 +66,39 @@ def neighbour_mean(pop: VNPopulation, values: np.ndarray) -> np.ndarray:
 
 def step_energy(pop: VNPopulation, rng: np.random.Generator,
                 lam: float = LAMBDA, kappa: float = KAPPA,
-                eta_std: float = ETA_STD) -> None:
-    """Advance the energy field one tick (in place)."""
-    g = np.bincount(pop.src, weights=pop.kedge * pop.energy[pop.dst],
-                    minlength=pop.n).astype(np.float32)
+                eta_std: float = ETA_STD,
+                e_target: float = E_TARGET) -> None:
+    """Advance the energy field one tick (in place).
+
+    cos(phi_j - phi_i) is recomputed every tick because the phase now moves.
+    """
+    dphi = pop.phase[pop.dst] - pop.phase[pop.src]
+    g = np.bincount(pop.src, weights=pop.wedge * np.cos(dphi)
+                    * pop.energy[pop.dst], minlength=pop.n).astype(np.float32)
     drive = kappa * np.tanh(g / np.sqrt(pop.deg))
     pop.energy *= (1.0 - lam)
-    pop.energy += drive
+    pop.energy += lam * e_target + drive
     if eta_std > 0.0:
         pop.energy += rng.normal(0.0, eta_std, size=pop.n).astype(np.float32)
+
+
+def step_phase(pop: VNPopulation, k: float = K_COUPLING) -> None:
+    """Kuramoto phase update, wrapped into [0, 2*pi)."""
+    dphi = pop.phase[pop.dst] - pop.phase[pop.src]
+    couple = np.bincount(pop.src, weights=np.sin(dphi),
+                         minlength=pop.n).astype(np.float32)
+    pop.phase += pop.omega + (k / pop.deg) * couple
+    np.mod(pop.phase, TWO_PI, out=pop.phase)
+
+
+def sync_order_parameter(pop: VNPopulation) -> float:
+    """Kuramoto order parameter R = |mean(exp(i*phi))| in [0, 1].
+
+    R~0 means phases are spread out (incoherent); R~1 means they locked.
+    """
+    c = float(np.cos(pop.phase).mean())
+    s = float(np.sin(pop.phase).mean())
+    return float(np.hypot(c, s))
 
 
 def step_state(pop: VNPopulation, injection: np.ndarray,
