@@ -13,10 +13,13 @@ from .group import BlockLayout, build_blocks
 from .neuron import DIM, VNPopulation
 from .update import (
     KAPPA,
+    K_COUPLING,
     normalise_energy,
     read_output,
     step_energy,
+    step_phase,
     step_state,
+    sync_order_parameter,
 )
 
 
@@ -28,6 +31,8 @@ class FieldStats:
     energy_std: float = 0.0
     total_energy: float = 0.0
     top_frac: float = 0.0        # fraction with e > 0.95
+    neg_frac: float = 0.0        # fraction with e < 0
+    sync_r: float = 0.0          # Kuramoto order parameter
     state_max: float = 0.0
     nan: bool = False
     rescales: int = 0
@@ -40,6 +45,7 @@ class Field:
     block_size: int = 64
     norm_every: int = 100
     kappa: float = KAPPA
+    k_coupling: float = K_COUPLING
     rng: np.random.Generator = field(init=False)
     layout: BlockLayout = field(init=False)
     stats: FieldStats = field(init=False)
@@ -58,7 +64,10 @@ class Field:
             self.injection[ids] = values.astype(np.float32)
 
     def tick(self) -> None:
+        # Energy reads the current phases, then the phases advance; both use
+        # phi(t), matching the stage-2 spec.
         step_energy(self.pop, self.rng, kappa=self.kappa)
+        step_phase(self.pop, k=self.k_coupling)
         step_state(self.pop, self.injection)
         s = self.stats
         s.step += 1
@@ -74,8 +83,11 @@ class Field:
         s.energy_std = float(e.std())
         s.total_energy = float(e.sum())
         s.top_frac = float((e > 0.95).mean())
+        s.neg_frac = float((e < 0.0).mean())
+        s.sync_r = sync_order_parameter(self.pop)
         s.state_max = float(np.abs(self.pop.state).max())
-        s.nan = bool(np.isnan(e).any() or np.isnan(self.pop.state).any())
+        s.nan = bool(np.isnan(e).any() or np.isnan(self.pop.state).any()
+                     or np.isnan(self.pop.phase).any())
         return s
 
     def run(self, steps: int, log_every: int = 0, reporter=None) -> FieldStats:
