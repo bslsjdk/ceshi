@@ -46,10 +46,11 @@ class VNPopulation:
     deg: np.ndarray         # float32 [N]
     W: np.ndarray           # float32 [DIM, DIM]
     bias: np.ndarray        # float32 [DIM]
-    adapter_a: np.ndarray   # float32 [N, RANK, DIM]
-    adapter_b: np.ndarray   # float32 [N, DIM, RANK]
+    adapter_a: np.ndarray   # float32 [M, RANK, DIM],  M = N or n_zones
+    adapter_b: np.ndarray   # float32 [M, DIM, RANK]
     region: np.ndarray      # uint8 [N]   0=RZ 1=EZ 2=TZ (stage 4)
     frozen: np.ndarray      # bool [N]    FVN: never mutated (stage 4)
+    zone_of: np.ndarray | None = None  # int32 [N] -> adapter group, or None
     A1: object = None       # cached scipy CSR, unit weights (see update._adjacency)
     Aw: object = None       # cached scipy CSR, wedge weights
     WM: object = None       # cached [N, DIM, DIM] fused W + B@A (see update._fused)
@@ -113,14 +114,24 @@ def build_population(n: int = 1000, degree: int = 8, seed: int = 0,
                      weight_sigma: float = 0.5,
                      omega_std: float = 0.3,
                      omega_mix: tuple[float, float, float] | None = None,
-                     region: int = 0) -> VNPopulation:
+                     region: int = 0,
+                     n_zones: int = 0) -> VNPopulation:
     """Create a population with a random degree-``degree`` graph.
 
     Weight mean is exactly 0 (centred) so no systematic positive feedback can
     build up after ``tanh`` saturation.
+
+    ``n_zones > 0`` switches the adapters from per-neuron to per-zone: the
+    population is cut into that many contiguous address blocks and A/B are
+    sized [n_zones, ...] instead of [n, ...].  That is what keeps the
+    trainable set inside a parameter budget -- per-neuron A/B costs 64,000
+    at n=1000, rank 4, on its own.
     """
     rng = np.random.default_rng(seed)
     src, dst = _random_edges(n, degree, rng)
+    zones = (np.arange(n) // max(1, n // n_zones)).astype(
+        np.int32) if n_zones > 0 else None
+    n_ad = n_zones if n_zones > 0 else n
 
     weight = rng.normal(0.0, weight_sigma, size=src.shape[0]).astype(np.float32)
     weight -= weight.mean()
@@ -158,8 +169,9 @@ def build_population(n: int = 1000, degree: int = 8, seed: int = 0,
         deg=deg,
         W=(rng.normal(0.0, 1.0 / np.sqrt(DIM), size=(DIM, DIM))).astype(np.float32),
         bias=np.zeros(DIM, dtype=np.float32),
-        adapter_a=rng.normal(0.0, 0.01, size=(n, RANK, DIM)).astype(np.float32),
-        adapter_b=rng.normal(0.0, 0.01, size=(n, DIM, RANK)).astype(np.float32),
+        adapter_a=rng.normal(0.0, 0.01, size=(n_ad, RANK, DIM)).astype(np.float32),
+        adapter_b=rng.normal(0.0, 0.01, size=(n_ad, DIM, RANK)).astype(np.float32),
         region=np.full(n, region, dtype=np.uint8),
         frozen=np.zeros(n, dtype=bool),
+        zone_of=zones,
     )
