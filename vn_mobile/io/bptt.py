@@ -70,6 +70,25 @@ class Window:
     losses: list = field(default_factory=list)    # float CE per tick
 
 
+def zone_sum(pop, values: np.ndarray) -> np.ndarray:
+    """Sum a per-neuron tensor into its adapter groups -> [M, ...].
+
+    With per-zone adapters every neuron in a group shares A and B, so
+    dL/dB_z = (sum over i in z of dz_i (x) x_i) @ A_z^T -- the group's
+    gradient is the *sum* of its members' outer products, which is why the
+    accumulation can happen before the matmul instead of after it.
+    """
+    z = pop.zone_of
+    if z is None:
+        return values
+    rows = values.shape[0]
+    flat = values.reshape(rows, -1)
+    out = np.empty((pop.adapter_a.shape[0], flat.shape[1]), dtype=np.float32)
+    for k in range(flat.shape[1]):
+        out[:, k] = np.bincount(z, weights=flat[:, k], minlength=out.shape[0])
+    return out.reshape(-1, *values.shape[1:])
+
+
 def head_backward(head, dlogits: np.ndarray, flat: np.ndarray):
     """Gradient w.r.t. readout weights plus dL/dflat, for either head type."""
     if isinstance(head, LowRankHead):
@@ -121,8 +140,9 @@ def backward_window(pop, head, win: Window, block: np.ndarray, vocab: int,
             dz = (dz * (clip / nrm)).astype(np.float32)
         db += dz.sum(axis=0)
         df = dz[:, :, None] * win.xs[m][:, None, :]
-        gb += np.matmul(df, np.transpose(pop.adapter_a, (0, 2, 1)))
-        ga += np.matmul(np.transpose(pop.adapter_b, (0, 2, 1)), df)
+        sg = zone_sum(pop, df)
+        gb += np.matmul(sg, np.transpose(pop.adapter_a, (0, 2, 1)))
+        ga += np.matmul(np.transpose(pop.adapter_b, (0, 2, 1)), sg)
         dx = np.matmul(ft, dz[:, :, None])[:, :, 0]
         g_h = (alpha * g_h + neighbour_mean_t(pop, dx)).astype(np.float32)
     # The objective is the mean loss over the window, not the sum, so the
