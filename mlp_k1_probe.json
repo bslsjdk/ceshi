@@ -1,0 +1,11 @@
+{
+  "k": 1,
+  "hidden": 80,
+  "params": 10545,
+  "hist": [],
+  "final": {
+    "val_loss": 2.7945,
+    "val_acc": 0.2463,
+    "val_bits": 4.0316
+  }
+}
