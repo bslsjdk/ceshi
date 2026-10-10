@@ -1,0 +1,11 @@
+=== fine single-omega sweep 0.20-0.32 ===
+{"R_mean": 0.84, "R_range_1k": 0.0098, "frozen": false, "e_mean": 0.3016, "e_std": 0.1155, "e_max": 0.7401, "omega_std": 0.2}
+{"R_mean": 0.7596, "R_range_1k": 0.0232, "frozen": false, "e_mean": 0.3018, "e_std": 0.105, "e_max": 0.7495, "omega_std": 0.22}
+{"R_mean": 0.6542, "R_range_1k": 0.0487, "frozen": false, "e_mean": 0.3013, "e_std": 0.0892, "e_max": 0.7257, "omega_std": 0.24}
+{"R_mean": 0.465, "R_range_1k": 0.0785, "frozen": false, "e_mean": 0.2986, "e_std": 0.0717, "e_max": 0.6568, "omega_std": 0.26}
+{"R_mean": 0.095, "R_range_1k": 0.21, "frozen": false, "e_mean": 0.3024, "e_std": 0.0577, "e_max": 0.5392, "omega_std": 0.28}
+{"R_mean": 0.0882, "R_range_1k": 0.1835, "frozen": false, "e_mean": 0.3031, "e_std": 0.0513, "e_max": 0.5428, "omega_std": 0.3}
+=== layered ===
+{"R_mean": 0.5778, "R_range_1k": 0.037, "frozen": false, "e_mean": 0.3026, "e_std": 0.0785, "e_max": 0.6559, "mix": [0.8, 0.2, 1.0]}
+{"R_mean": 0.0488, "R_range_1k": 0.0661, "frozen": false, "e_mean": 0.3022, "e_std": 0.0468, "e_max": 0.5022, "mix": [0.8, 0.3, 1.0]}
+{"R_mean": 0.0846, "R_range_1k": 0.1519, "frozen": false, "e_mean": 0.3036, "e_std": 0.0508, "e_max": 0.5452, "mix": [0.8, 0.25, 1.0]}

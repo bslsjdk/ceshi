@@ -48,10 +48,9 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
     ``rolling`` merges every round too; merged slots leave for good while culled
     slots return after reinit, so the terminal rate climbs regardless.
     """
-    """``forced_pulse`` > 0 holds RZ neurons hot so EZ overflow fires; it is
-    applied every tick because a one-shot injection decays below the overflow
-    band long before the next 1000-tick check.
-    """
+    # forced_pulse > 0 holds RZ neurons hot so EZ overflow fires; it is applied
+    # every tick because a one-shot injection decays below the overflow band
+    # long before the next 1000-tick check.
     rng = np.random.default_rng(seed)
     pop = build_population(n=n_main, degree=8, seed=seed,
                            omega_mix=(0.8, 0.3, 1.0))
@@ -70,6 +69,7 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
     # some are genuinely harder to predict.
     zm = zone_of_main(pop.addr, n_zones)
     amp = rng.uniform(amp_lo, amp_hi, size=n_zones).astype(np.float32)
+    tz.zone_amp = amp          # diagnostics: is zone spread drive or horizon?
     hot = np.setdiff1d(rz_ids, np.flatnonzero(pop.frozen))[:20]
     max_hz = int(tz.hz_bn.max()) + 1      # ring must exceed the longest lag
     buf = np.zeros((max_hz, n_bn), dtype=np.float32)

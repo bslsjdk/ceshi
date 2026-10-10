@@ -144,20 +144,32 @@ def test_energy_fixed_point_sits_at_target():
 
 
 def test_coupling_lifts_sync_without_locking():
-    """R rises with K but stops short of locking.
+    """Mean R rises with K but stops short of locking.
 
-    Under uniform omega_std=0.1 this used to assert R>0.9 at K=0.5.  Stage 4
-    layered omega (80% @0.3 + 20% @1.0) so the bulk keeps a sync frame while a
-    minority keeps drifting: measured R is ~0.30 at K=0.5, ~0.04 at K=0.05.
-    Locking is exactly what the layering exists to prevent.
+    A single end-of-run snapshot is not a measurement here: with heterogeneous
+    omega the order parameter swings between 0.02 and 0.35 every few hundred
+    ticks, so the old ``R > 0.25`` at t=4000 was reading one fluctuation.  It
+    survived only because the trajectory was bit-for-bit reproducible; a
+    2e-7 change in the coupling term (sparse matvec) moved the end value to
+    0.096 while leaving the time average at 0.21.  Averaging over the run
+    gives a quantity that is stable under that rewrite, ~0.07 at K=0.05 vs
+    ~0.21 at K=0.5.
     """
-    rs = {}
-    for k in (0.05, 0.5):
+
+    def mean_r(k, steps=4000, burn=1000):
         f = Field(make_pop(n=256, seed=37), seed=37, k_coupling=k)
-        rs[k] = f.run(4000).sync_r
-    assert rs[0.05] < 0.3
-    assert rs[0.5] > 0.25
-    assert rs[0.5] < 0.9
+        acc = []
+
+        def rep(st):
+            if st.step > burn:
+                acc.append(st.sync_r)
+        f.run(steps, log_every=100, reporter=rep)
+        return float(np.mean(acc))
+
+    lo, hi = mean_r(0.05), mean_r(0.5)
+    assert lo < 0.15
+    assert hi > lo * 2          # coupling lifts synchronisation
+    assert hi < 0.9             # heterogeneous omega stops it locking
 
 
 def test_weak_drive_leaves_field_flat():

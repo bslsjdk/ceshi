@@ -1,0 +1,4 @@
+n=1000 degree=8 edges=15880 sigma=4.0 kappa=0.05 K=0.2
+warmup 2000 steps in 0.944s -> 472.2 us/step
+step=   102000 e_max=0.7505 e_mean=0.3009 e_std=0.1326 total=300.88 top_frac=0.00e+00 h_max=0.0000 neg=0.016 R=0.6211 rescales=0
+step=   202000 e_max=0.7314 e_mean=0.3053 e_std=0.1352 total=305.33 top_frac=0.00e+00 h_max=0.0000 neg=0.016 R=0.6016 rescales=0

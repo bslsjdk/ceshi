@@ -50,6 +50,9 @@ class VNPopulation:
     adapter_b: np.ndarray   # float32 [N, DIM, RANK]
     region: np.ndarray      # uint8 [N]   0=RZ 1=EZ 2=TZ (stage 4)
     frozen: np.ndarray      # bool [N]    FVN: never mutated (stage 4)
+    A1: object = None       # cached scipy CSR, unit weights (see update._adjacency)
+    Aw: object = None       # cached scipy CSR, wedge weights
+    WM: object = None       # cached [N, DIM, DIM] fused W + B@A (see update._fused)
 
     @property
     def n_edges(self) -> int:

@@ -1,0 +1,8 @@
+{"omega_std": 0.1, "R_at_10k": 0.9752, "R_at_30k": 0.9752, "R_at_60k": 0.9752, "R_range_1k": 0.0, "frozen": true, "e_mean": 0.3024, "e_std": 0.1465, "e_max": 0.8251, "nan": false}
+{"omega_std": 0.2, "R_at_10k": 0.8328, "R_at_30k": 0.8356, "R_at_60k": 0.8354, "R_range_1k": 0.0172, "frozen": false, "e_mean": 0.3023, "e_std": 0.1161, "e_max": 0.7471, "nan": false}
+{"omega_std": 0.3, "R_at_10k": 0.0368, "R_at_30k": 0.0689, "R_at_60k": 0.1011, "R_range_1k": 0.1835, "frozen": false, "e_mean": 0.3031, "e_std": 0.0516, "e_max": 0.4881, "nan": false}
+{"omega_std": 0.4, "R_at_10k": 0.0504, "R_at_30k": 0.0841, "R_at_60k": 0.0712, "R_range_1k": 0.0937, "frozen": false, "e_mean": 0.303, "e_std": 0.045, "e_max": 0.5766, "nan": false}
+{"omega_std": 0.5, "R_at_10k": 0.0539, "R_at_30k": 0.0602, "R_at_60k": 0.055, "R_range_1k": 0.1151, "frozen": false, "e_mean": 0.3045, "e_std": 0.0397, "e_max": 0.4844, "nan": false}
+{"omega_std": 0.7, "R_at_10k": 0.0353, "R_at_30k": 0.0519, "R_at_60k": 0.0472, "R_range_1k": 0.0841, "frozen": false, "e_mean": 0.3007, "e_std": 0.034, "e_max": 0.5237, "nan": false}
+{"omega_std": 1.0, "R_at_10k": 0.0263, "R_at_30k": 0.0763, "R_at_60k": 0.0259, "R_range_1k": 0.0899, "frozen": false, "e_mean": 0.3006, "e_std": 0.0282, "e_max": 0.4981, "nan": false}
+wrote sweep_report.md

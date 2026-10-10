@@ -31,11 +31,11 @@ def reinit(tz: TrialZone, idx: np.ndarray, rng: np.random.Generator) -> None:
                                                    p.adapter_b.shape[2])
                                   ).astype(np.float32)
     p.energy[idx] = rng.uniform(0.0, 0.02, size=n).astype(np.float32)
+    p.WM = None
     tz.score[idx] = 0.0
     tz.util[idx] = 0.0
     tz.stab[idx] = 0.0
     tz.pred_mean[idx] = 0.0
-    tz.zero_util_steps[idx] = 0
     tz.merged[idx] = 0
     tz.reinit_count += int(n)
     if tz.reinit_round is not None:

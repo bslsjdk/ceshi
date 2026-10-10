@@ -19,7 +19,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from .neuron import DIM, VNPopulation
-from .update import step_energy, step_phase
+from .update import _fused, step_energy, step_phase
+from .zstats import zone_means, zone_median_std
 
 TZ_BUDGET_BYTES = 100 * 1024 * 1024
 CULL_WINDOW = 2000      # selection-round length, kept for callers
@@ -42,8 +43,6 @@ class TrialZone:
     util: np.ndarray         # float32 [N_bn] activation frequency
     stab: np.ndarray         # float32 [N_bn] E[x^2] accumulator
     pred_mean: np.ndarray    # float32 [N_bn] E[x] accumulator
-    prev_shadow: np.ndarray  # float32 [N_bn] shadow energy one sample ago
-    zero_util_steps: np.ndarray  # int32 [N_bn]
     merged: np.ndarray       # int8 [N_bn] 0=trial 1=EZ 2=RZ -1=culled
     hz_bn: np.ndarray        # int32 [N_bn] prediction lag in samples
     cull_events: int = 0     # cumulative relative culls
@@ -63,10 +62,9 @@ class TrialZone:
     def _predict(self, shadow_vals: np.ndarray) -> np.ndarray:
         p = self.pop
         x = np.repeat(shadow_vals[:, None], DIM, axis=1)
-        linear = x @ p.W.T + p.bias
-        mid = np.matmul(p.adapter_a, x[:, :, None])[:, :, 0]
-        adapted = np.matmul(p.adapter_b, mid[:, :, None])[:, :, 0]
-        return (p.scale * np.tanh(linear + adapted).mean(axis=1)).astype(np.float32)
+        # Fused W + B@A: one batched matmul, the same trick as step_state.
+        z = np.matmul(_fused(p), x[:, :, None])[:, :, 0] + p.bias
+        return (p.scale * np.tanh(z).mean(axis=1)).astype(np.float32)
 
     def forward(self, main_energy: np.ndarray) -> np.ndarray:
         return self._predict(self.shadow_energy(main_energy))
@@ -94,6 +92,7 @@ class TrialZone:
 
         p.adapter_b -= (self.lr * grad_b).astype(np.float32)
         p.adapter_a -= (self.lr * grad_a).astype(np.float32)
+        p.WM = None                      # fused matrix is stale after training
         return float(np.mean(err ** 2))
 
     def evaluate(self, prev_shadow: np.ndarray, target: np.ndarray) -> None:
@@ -111,13 +110,7 @@ class TrialZone:
         # sigmoid((|pred| - median_zone) / (std_zone + eps)).  A binary median
         # gate is bimodal by construction -- half of every zone reads 1 and half
         # reads 0 -- so within-zone spread was the gate's artifact.
-        med_a = np.zeros_like(act)
-        std_a = np.zeros_like(act)
-        for u in np.unique(self.zone_id):
-            m = self.zone_id == u
-            if m.any():
-                med_a[m] = float(np.median(act[m]))
-                std_a[m] = float(np.std(act[m]))
+        med_a, std_a = zone_median_std(act, self.zone_id)
         if self.util_norm == "global":
             # Dividing by the zone's own std rescales every zone to unit width,
             # so sigmoid output has std ~0.19 inside EVERY zone regardless of
@@ -136,10 +129,7 @@ class TrialZone:
         # dropped (both constant 0.0).  cost = output magnitude; conflict =
         # distance from this zone's consensus prediction.
         cost = np.clip(act, 0.0, 1.0)
-        med = np.zeros_like(pred)
-        for u in np.unique(self.zone_id):
-            m = self.zone_id == u
-            med[m] = float(np.median(pred[m])) if m.any() else 0.0
+        med, _ = zone_median_std(pred, self.zone_id)
         conflict = np.clip(np.abs(pred - med) / (np.abs(med) + 1e-6), 0.0, 1.0)
         self.score = (0.4 * acc + 0.2 * self.util + 0.2 * contrib
                       + 0.1 * stab_score - 0.05 * cost
@@ -180,19 +170,30 @@ class TrialZone:
 
     def promote_or_cull(self) -> tuple[int, int, int]:
         """Terminal merge decision; culling is relative, see cull.py."""
-        self.zero_util_steps = np.where(self.util <= 1e-6,
-                                        self.zero_util_steps + 1, 0)
         n_rz, n_ez = self.promote_relative()
         return n_rz, n_ez, 0
 
 
     def zone_stats(self) -> dict:
-        """Between-zone vs within-zone score spread (division of labour)."""
+        """Zone-level score spread plus the difficulty-ordering check.
+
+        ``between/within > 1`` was dropped: it measures individual skill
+        spread against task-difficulty spread, and in a self-supervised
+        predictor the former is naturally an order of magnitude larger.
+        The replacement asks the direct question -- does a zone that has to
+        predict further ahead actually score lower?
+        """
         z, alive = self.zone_id, self.merged == 0
         if alive.sum() == 0:
             return {}
         ids = [u for u in np.unique(z[alive])]
         means = np.array([self.score[alive & (z == u)].mean() for u in ids])
         within = np.mean([self.score[alive & (z == u)].std() for u in ids])
-        return {"between_zone_std": float(means.std()),
-                "within_zone_std": float(within)}
+        _, hz = zone_means(self.hz_bn, z, alive)
+        corr = float("nan")
+        if np.std(hz) > 1e-12 and np.std(means) > 1e-12:
+            corr = float(np.corrcoef(means, -hz)[0, 1])
+        return {"between_zone_std": round(float(means.std()), 4),
+                "within_zone_std": round(float(within), 4),
+                "horizon_corr": round(corr, 4),
+                "n_zones": int(len(ids))}
