@@ -1,0 +1,43 @@
+{
+  "steps": 4000,
+  "T": 20,
+  "lr": 0.003,
+  "seed": 0,
+  "head": "lowrank",
+  "preset": "readout_bias",
+  "hist": 1,
+  "params": {
+    "readout": 9360,
+    "bias": 8,
+    "adapters": 0,
+    "total": 9368
+  },
+  "hist_cfg": [
+    {
+      "step": 2000,
+      "train_bits": 5.059,
+      "val": {
+        "val_loss": 4.0702,
+        "val_acc": 0.1055,
+        "val_bits": 5.8721
+      },
+      "wall_s": 2.6
+    },
+    {
+      "step": 4000,
+      "train_bits": NaN,
+      "val": {
+        "val_loss": NaN,
+        "val_acc": 0.0365,
+        "val_bits": NaN
+      },
+      "wall_s": 5.0
+    }
+  ],
+  "final": {
+    "val_loss": NaN,
+    "val_acc": 0.0357,
+    "val_bits": NaN
+  },
+  "rss_mb": 41.9
+}
