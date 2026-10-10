@@ -50,12 +50,14 @@ class Field:
     layout: BlockLayout = field(init=False)
     stats: FieldStats = field(init=False)
     injection: np.ndarray = field(init=False)
+    e_injection: np.ndarray = field(init=False)
 
     def __post_init__(self) -> None:
         self.rng = np.random.default_rng(self.seed)
         self.layout = build_blocks(self.pop, self.block_size)
         self.stats = FieldStats()
         self.injection = np.zeros((self.pop.n, DIM), dtype=np.float32)
+        self.e_injection = np.zeros(self.pop.n, dtype=np.float32)
 
     def perturb(self, ids: np.ndarray, values: np.ndarray) -> None:
         """Inject an external drive.  Cleared on the next tick."""
@@ -63,10 +65,17 @@ class Field:
         if len(ids):
             self.injection[ids] = values.astype(np.float32)
 
+    def perturb_energy(self, ids: np.ndarray, values: np.ndarray) -> None:
+        """Stage 3: drive the wave field directly, not through the state layer."""
+        self.e_injection[:] = 0.0
+        if len(ids):
+            self.e_injection[ids] = values.astype(np.float32)
+
     def tick(self) -> None:
         # Energy reads the current phases, then the phases advance; both use
         # phi(t), matching the stage-2 spec.
-        step_energy(self.pop, self.rng, kappa=self.kappa)
+        step_energy(self.pop, self.rng, kappa=self.kappa,
+                    injection=self.e_injection)
         step_phase(self.pop, k=self.k_coupling)
         step_state(self.pop, self.injection)
         s = self.stats
