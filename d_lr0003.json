@@ -1,0 +1,44 @@
+{
+  "steps": 100000,
+  "T": 20,
+  "lr": 0.0003,
+  "seed": 0,
+  "rank": 16,
+  "zones": 20,
+  "preset": "all",
+  "hist": 1,
+  "params": {
+    "readout": 9360,
+    "bias": 8,
+    "adapters": 1280,
+    "total": 10648
+  },
+  "hist_cfg": [
+    {
+      "step": 50000,
+      "train_bits": 4.5144,
+      "val": {
+        "val_loss": 3.0865,
+        "val_acc": 0.1735,
+        "val_bits": 4.4528
+      },
+      "wall_s": 54.9
+    },
+    {
+      "step": 100000,
+      "train_bits": 4.121,
+      "val": {
+        "val_loss": 3.0231,
+        "val_acc": 0.2015,
+        "val_bits": 4.3614
+      },
+      "wall_s": 108.4
+    }
+  ],
+  "final": {
+    "val_loss": 2.9956,
+    "val_acc": 0.2087,
+    "val_bits": 4.3218
+  },
+  "rss_mb": 45.1
+}
