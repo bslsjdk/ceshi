@@ -1,0 +1,130 @@
+{
+  "steps": 100000,
+  "lr": 0.001,
+  "uniform_bits": 6.022,
+  "unigram_bits": 4.774,
+  "sklearn_bits": 4.276,
+  "gpt_team_bits": 1.088,
+  "rows": [
+    {
+      "hist": 1,
+      "final": {
+        "step": 100000,
+        "val_bits": 4.3815,
+        "val_acc": 0.195
+      },
+      "curve": [
+        {
+          "step": 25000,
+          "val_bits": 4.448,
+          "val_acc": 0.1945
+        },
+        {
+          "step": 50000,
+          "val_bits": 4.4223,
+          "val_acc": 0.204
+        },
+        {
+          "step": 75000,
+          "val_bits": 4.4517,
+          "val_acc": 0.193
+        },
+        {
+          "step": 100000,
+          "val_bits": 4.3815,
+          "val_acc": 0.195
+        }
+      ]
+    },
+    {
+      "hist": 2,
+      "final": {
+        "step": 100000,
+        "val_bits": 5.2331,
+        "val_acc": 0.171
+      },
+      "curve": [
+        {
+          "step": 25000,
+          "val_bits": 4.7823,
+          "val_acc": 0.1675
+        },
+        {
+          "step": 50000,
+          "val_bits": 5.0593,
+          "val_acc": 0.148
+        },
+        {
+          "step": 75000,
+          "val_bits": 5.0338,
+          "val_acc": 0.166
+        },
+        {
+          "step": 100000,
+          "val_bits": 5.2331,
+          "val_acc": 0.171
+        }
+      ]
+    },
+    {
+      "hist": 4,
+      "final": {
+        "step": 100000,
+        "val_bits": 7.6715,
+        "val_acc": 0.1385
+      },
+      "curve": [
+        {
+          "step": 25000,
+          "val_bits": 6.6979,
+          "val_acc": 0.127
+        },
+        {
+          "step": 50000,
+          "val_bits": 7.2932,
+          "val_acc": 0.108
+        },
+        {
+          "step": 75000,
+          "val_bits": 7.015,
+          "val_acc": 0.1335
+        },
+        {
+          "step": 100000,
+          "val_bits": 7.6715,
+          "val_acc": 0.1385
+        }
+      ]
+    },
+    {
+      "hist": 8,
+      "final": {
+        "step": 100000,
+        "val_bits": 10.1355,
+        "val_acc": 0.1215
+      },
+      "curve": [
+        {
+          "step": 25000,
+          "val_bits": 8.8359,
+          "val_acc": 0.118
+        },
+        {
+          "step": 50000,
+          "val_bits": 9.542,
+          "val_acc": 0.0965
+        },
+        {
+          "step": 75000,
+          "val_bits": 8.9877,
+          "val_acc": 0.127
+        },
+        {
+          "step": 100000,
+          "val_bits": 10.1355,
+          "val_acc": 0.1215
+        }
+      ]
+    }
+  ]
+}

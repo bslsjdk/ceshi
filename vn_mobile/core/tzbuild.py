@@ -8,7 +8,7 @@ import numpy as np
 
 from .neuron import MODE_TRIAL, build_population
 from .trial import BASE_HORIZON, SAMPLE_EVERY, TrialZone
-from .update import step_energy, step_phase
+from .update import K_COUPLING, step_energy, step_phase
 
 
 def zone_of_main(main_addr: np.ndarray, n_zones: int) -> np.ndarray:
@@ -85,7 +85,15 @@ def make_trial_zone(n_bn: int = 1000, n_main: int = 1000, n_zones: int = 20,
     )
 
 
-def tick_trial(tz: TrialZone, rng: np.random.Generator) -> None:
-    """Keep the TZ wave field alive; per-BN kappa gives each BN its own gain."""
-    step_energy(tz.pop, rng, kappa=tz.kappa)
-    step_phase(tz.pop)
+def tick_trial(tz: TrialZone, rng: np.random.Generator,
+               scale: float = 1.0) -> None:
+    """Keep the TZ wave field alive; per-BN kappa gives each BN its own gain.
+
+    ``scale`` lets the caller batch ticks: running every ``TZ_EVERY`` steps
+    with ``scale=TZ_EVERY`` covers the same elapsed time at half the call
+    count.  Energy drive and phase advance are both linear in the step, so
+    they scale; the decay term is not, which is why this stays an explicit
+    compile-time choice rather than the default.
+    """
+    step_energy(tz.pop, rng, kappa=tz.kappa * scale)
+    step_phase(tz.pop, k=K_COUPLING * scale)

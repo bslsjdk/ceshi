@@ -29,7 +29,16 @@ ACC_COEF = 50.0         # 1/(1+10*se) was too flat to separate BNs
 CULL_FRAC = 0.40        # relative: worst 40% of each zone, every 2000 steps
 PROMOTE_FRAC = 0.12     # relative: best 12% of each zone merges, not score>0.7
 BASE_HORIZON = 50       # ticks; zone i uses BASE_HORIZON*(0.5+0.1*i)
-SAMPLE_EVERY = 10       # ticks between stored shadow samples
+# Task 1.2: 10 -> 20.  Sampling is the third-largest cost in the profile
+# (train_step + zone_median_std ~ 0.265 s per 6000 steps, ~44 us/step) and it
+# is a measurement cost, not part of the wave dynamics.  zone_horizon divides
+# by this, so the physical look-ahead in TICKS is unchanged -- only the number
+# of stored samples along the way drops.
+SAMPLE_EVERY = 20       # ticks between stored shadow samples
+# Task 1.2: the BN wave field is ticked every TZ_EVERY steps with the step
+# scaled by the same factor, instead of every step.  Explicit Euler is first
+# order, so 2x step every 2 ticks tracks 1x step every tick to O(dt).
+TZ_EVERY = 2
 
 
 @dataclass

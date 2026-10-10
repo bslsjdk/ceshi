@@ -1,0 +1,12 @@
+{
+  "samples": 12000,
+  "features": 520,
+  "uniform_bits": 6.022,
+  "unigram_bits": 4.774,
+  "repr_snr": 16.2448,
+  "sklearn_train_bits": 3.3743,
+  "sklearn_train_acc": 0.3266,
+  "sklearn_val_bits": 4.2761,
+  "sklearn_val_acc": 0.2504,
+  "val_class_coverage": 0.9992
+}

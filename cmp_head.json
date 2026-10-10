@@ -1,0 +1,35 @@
+{
+  "uniform_bits": 6.022,
+  "unigram_bits": 4.774,
+  "sklearn_bits": 4.276,
+  "rows": [
+    {
+      "full": true,
+      "lr": 0.001,
+      "steps": 20000,
+      "val_bits": 4.5008,
+      "val_acc": 0.183
+    },
+    {
+      "full": true,
+      "lr": 0.01,
+      "steps": 20000,
+      "val_bits": 5.4343,
+      "val_acc": 0.1855
+    },
+    {
+      "full": false,
+      "lr": 0.001,
+      "steps": 20000,
+      "val_bits": 8.4966,
+      "val_acc": 0.043
+    },
+    {
+      "full": false,
+      "lr": 0.01,
+      "steps": 20000,
+      "val_bits": 11.2857,
+      "val_acc": 0.0455
+    }
+  ]
+}

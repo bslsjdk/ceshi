@@ -1,0 +1,90 @@
+{
+  "rows": [
+    {
+      "term": "adapter_b",
+      "flat_index": 423,
+      "numeric": -2.987e-05,
+      "analytic": 2.82e-06,
+      "ratio": -0.0944
+    },
+    {
+      "term": "adapter_b",
+      "flat_index": 833,
+      "numeric": 0.0,
+      "analytic": -0.0,
+      "ratio": null
+    },
+    {
+      "term": "adapter_b",
+      "flat_index": 305,
+      "numeric": 0.0,
+      "analytic": -0.0,
+      "ratio": null
+    },
+    {
+      "term": "adapter_b",
+      "flat_index": 266,
+      "numeric": 0.0,
+      "analytic": -5e-08,
+      "ratio": null
+    },
+    {
+      "term": "adapter_b",
+      "flat_index": 853,
+      "numeric": 0.0,
+      "analytic": 0.0,
+      "ratio": null
+    },
+    {
+      "term": "adapter_b",
+      "flat_index": 111,
+      "numeric": 0.0,
+      "analytic": 9e-08,
+      "ratio": null
+    },
+    {
+      "term": "adapter_a",
+      "flat_index": 423,
+      "numeric": 0.0,
+      "analytic": -7.1e-06,
+      "ratio": null
+    },
+    {
+      "term": "adapter_a",
+      "flat_index": 833,
+      "numeric": 0.0,
+      "analytic": 0.0,
+      "ratio": null
+    },
+    {
+      "term": "adapter_a",
+      "flat_index": 305,
+      "numeric": 0.0,
+      "analytic": 1e-08,
+      "ratio": null
+    },
+    {
+      "term": "adapter_a",
+      "flat_index": 266,
+      "numeric": 0.0,
+      "analytic": 0.0,
+      "ratio": null
+    },
+    {
+      "term": "adapter_a",
+      "flat_index": 853,
+      "numeric": 0.0,
+      "analytic": -0.0,
+      "ratio": null
+    },
+    {
+      "term": "adapter_a",
+      "flat_index": 111,
+      "numeric": 0.0,
+      "analytic": 0.0,
+      "ratio": null
+    }
+  ],
+  "mismatches": 12,
+  "verdict": "GRADIENT WRONG"
+}

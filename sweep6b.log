@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/data/workspace/ceshi/sweep6b.py", line 34, in <module>
+    main()
+  File "/data/workspace/ceshi/sweep6b.py", line 17, in main
+    r = run(200, 1000, 0.0, 0, 0, 20, 0, "head_bias")
+  File "/data/workspace/ceshi/train6a.py", line 75, in run
+    loss, ok = train_char(pop, block, head, int(nxt), lr, ALPHA,
+  File "/data/workspace/ceshi/vn_mobile/io/charhead.py", line 105, in train_char
+    pop.bias -= (lr * dz).astype(np.float32)
+ValueError: non-broadcastable output operand with shape (8,) doesn't match the broadcast shape (1000,8)

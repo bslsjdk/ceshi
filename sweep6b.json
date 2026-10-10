@@ -1,0 +1,98 @@
+{
+  "steps": 20000,
+  "unigram_bits": 4.774,
+  "uniform_bits": 6.022,
+  "gpt_team_bits": 1.088,
+  "rows": [
+    {
+      "preset": "none",
+      "lr": 0.0,
+      "val_bits": null,
+      "note": "untrained"
+    },
+    {
+      "preset": "adapter",
+      "lr": 0.0001,
+      "train_acc": 0.0289,
+      "val_bits": 6.0277,
+      "val_acc": 0.034
+    },
+    {
+      "preset": "adapter",
+      "lr": 0.001,
+      "train_acc": 0.0289,
+      "val_bits": 6.0277,
+      "val_acc": 0.034
+    },
+    {
+      "preset": "adapter",
+      "lr": 0.01,
+      "train_acc": 0.0289,
+      "val_bits": 6.0277,
+      "val_acc": 0.034
+    },
+    {
+      "preset": "head",
+      "lr": 0.0001,
+      "train_acc": 0.029,
+      "val_bits": 6.0383,
+      "val_acc": 0.035
+    },
+    {
+      "preset": "head",
+      "lr": 0.001,
+      "train_acc": 0.0317,
+      "val_bits": 8.4966,
+      "val_acc": 0.043
+    },
+    {
+      "preset": "head",
+      "lr": 0.01,
+      "train_acc": 0.0507,
+      "val_bits": 11.2857,
+      "val_acc": 0.0455
+    },
+    {
+      "preset": "head_bias",
+      "lr": 0.0001,
+      "train_acc": 0.0308,
+      "val_bits": 6.0338,
+      "val_acc": 0.041
+    },
+    {
+      "preset": "head_bias",
+      "lr": 0.001,
+      "train_acc": 0.0815,
+      "val_bits": 5.9931,
+      "val_acc": 0.1445
+    },
+    {
+      "preset": "head_bias",
+      "lr": 0.01,
+      "train_acc": 0.0724,
+      "val_bits": 28.3309,
+      "val_acc": 0.052
+    },
+    {
+      "preset": "all",
+      "lr": 0.0001,
+      "train_acc": 0.0308,
+      "val_bits": 6.0338,
+      "val_acc": 0.041
+    },
+    {
+      "preset": "all",
+      "lr": 0.001,
+      "train_acc": 0.0815,
+      "val_bits": 5.9931,
+      "val_acc": 0.1445
+    },
+    {
+      "preset": "all",
+      "lr": 0.01,
+      "train_acc": 0.0727,
+      "val_bits": 23.21,
+      "val_acc": 0.1415
+    }
+  ]
+}

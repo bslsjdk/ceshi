@@ -17,12 +17,17 @@ from vn_mobile.core.update import E_TARGET, step_energy, step_phase, step_state
 from vn_mobile.io import vnpkg
 from stages5cd import run_5c, run_5d
 
-# Prediction lag in BN samples (one sample every 10 ticks).  Predicting the very
-# next sample is too easy: every BN nails it, scores saturate and the merge rate
-# collapses to 0%.  Each zone now predicts a DIFFERENT number of ticks ahead --
-# zone 0 -> 25 ticks, zone 19 -> 120 -- so difficulty, and therefore score,
-# varies between zones and not only within them.
-SAMPLE_EVERY = 10
+# Prediction lag in BN samples.  Predicting the very next sample is too easy:
+# every BN nails it, scores saturate and the merge rate collapses to 0%.  Each
+# zone now predicts a DIFFERENT number of ticks ahead -- zone 0 -> 25 ticks,
+# zone 19 -> 120 -- so difficulty, and therefore score, varies between zones
+# and not only within them.
+# Imported, not redeclared: the two copies silently drifting apart would change
+# the horizon arithmetic in tzbuild.zone_horizon without any visible error.
+from vn_mobile.core.trial import SAMPLE_EVERY, TZ_EVERY  # noqa: E402
+
+# Length of the pre-drawn drive-noise cycle, see the injection site below.
+NOISE_BLOCK = 64
 
 
 def setup_regions(pop, n_rz: int = 300, n_fvn: int = 50, n_tvn: int = 5,
@@ -42,7 +47,8 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
            n_rz: int = 300, forced_pulse: float = 0.0,
            lr: float | None = None, amp_lo: float = 0.2, amp_hi: float = 1.5,
            promote_mode: str = "terminal", util_norm: str = "zone",
-           hz_lo: float = 0.5, hz_step: float = 0.1):
+           hz_lo: float = 0.5, hz_step: float = 0.1,
+           noise_live: bool = False):
     """``promote_mode``: ``terminal`` culls every 2000-step round and merges the
     best 12% once at the end, so the terminal merge rate equals the parameter.
     ``rolling`` merges every round too; merged slots leave for good while culled
@@ -73,6 +79,8 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
     hot = np.setdiff1d(rz_ids, np.flatnonzero(pop.frozen))[:20]
     max_hz = int(tz.hz_bn.max()) + 1      # ring must exceed the longest lag
     buf = np.zeros((max_hz, n_bn), dtype=np.float32)
+    noise_block = (rng.normal(0.0, 0.01, size=(NOISE_BLOCK, n_main))
+                   * amp[zm]).astype(np.float32)
     bn_idx = np.arange(n_bn)
     hpos = filled = 0
     hist, mse0, mse_last, ov_total = [], None, float("nan"), 0
@@ -106,7 +114,16 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
             inj_e[pick] = amp[zm[pick]]
             inj_h[pick] = 1.0
         elif t % 10:
-            inj_e[:] = rng.normal(0.0, 0.01, size=n_main) * amp[zm]
+            # Pre-drawn block instead of a fresh draw every tick: drawing 1000
+            # normals costs 22.2 us/step and reading a cached row costs 1.5.
+            # Same N(0, 0.01) * amp marginal, repeated with period NOISE_BLOCK
+            # -- long enough that it cannot beat against the energy decay
+            # (time constant 1/lambda = 10 ticks).  ``noise_live`` restores the
+            # per-tick draw so the two paths stay comparable.
+            if noise_live:
+                inj_e[:] = rng.normal(0.0, 0.01, size=n_main) * amp[zm]
+            else:
+                inj_e[:] = noise_block[t % NOISE_BLOCK]
         if forced_pulse > 0.0:
             inj_e[hot] = forced_pulse
         if t % SAMPLE_EVERY == 0:
@@ -122,7 +139,10 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
                     mse0 = loss
                 mse_last = loss
                 tz.evaluate(old, cur)
-        tick_trial(tz, rng)
+        if t % TZ_EVERY == 0:
+            # Batched: same elapsed dynamics, half the calls.  TZ is the single
+            # largest optional cost in the profile (~46 us/step at every tick).
+            tick_trial(tz, rng, scale=float(TZ_EVERY))
         if log_every and (t + 1) % log_every == 0:
             hist.append(dict(step=t + 1, R=_R_live(pop),
                              e_mean=float(pop.energy.mean()),

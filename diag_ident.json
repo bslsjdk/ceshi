@@ -1,0 +1,15 @@
+{
+  "vocab": 65,
+  "limit": 2000,
+  "uniform_bits": 6.0224,
+  "y_pooling": {
+    "identity_rate": 0.152,
+    "acc": 0.035,
+    "bits": 6.028
+  },
+  "h_pooling": {
+    "identity_rate": 0.0735,
+    "acc": 0.0175,
+    "bits": 6.0295
+  }
+}
