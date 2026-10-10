@@ -1,0 +1,56 @@
+[
+ {
+  "mode": "fixed",
+  "tau": -1.0,
+  "bits": 4.47046955931621,
+  "acc": 0.1935,
+  "edge_active": 1.0,
+  "node_active": 1.0,
+  "trainable": 9360
+ },
+ {
+  "mode": "wave",
+  "tau": -1.0,
+  "bits": 4.47046955931621,
+  "acc": 0.1935,
+  "edge_active": 1.0,
+  "node_active": 1.0,
+  "trainable": 9360
+ },
+ {
+  "mode": "wave",
+  "tau": 0.0,
+  "bits": 4.47046955931621,
+  "acc": 0.1935,
+  "edge_active": 0.5053750276565552,
+  "node_active": 1.0,
+  "trainable": 9360
+ },
+ {
+  "mode": "wave",
+  "tau": 0.3,
+  "bits": 4.47046955931621,
+  "acc": 0.1935,
+  "edge_active": 0.12437500059604645,
+  "node_active": 1.0,
+  "trainable": 9360
+ },
+ {
+  "mode": "wave",
+  "tau": 0.5,
+  "bits": 4.47046955931621,
+  "acc": 0.1935,
+  "edge_active": 0.02174999937415123,
+  "node_active": 1.0,
+  "trainable": 9360
+ },
+ {
+  "mode": "wave",
+  "tau": 0.7,
+  "bits": 4.47046955931621,
+  "acc": 0.1935,
+  "edge_active": 0.0020000000949949026,
+  "node_active": 1.0,
+  "trainable": 9360
+ }
+]
