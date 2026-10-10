@@ -1,17 +1,7 @@
 """Stage 6A correction driver: low-rank readout + truncated BPTT.
 
-Two structural fixes, in the order the spec asks for them:
-
-1. Low-rank readout so the trainable parameter count fits the 14,770 budget.
-2. Truncated BPTT (T=20) so the field can be trained to remember rather
-   than only to react.
-
-The parameter accounting is printed before training because it decides what
-may be trained at all: the per-neuron adapters are [N,R,DIM] + [N,DIM,R] =
-64,000 at N=1000, R=4, so "train the adapters" costs 4x the entire budget on
-its own.  Under the budget the trainable set is readout + bias only, which is
-also the set BPTT can actually help (bias sits inside the unrolled
-recurrence; the readout has no path into the state).
+Low-rank readout (fits the 14,770 budget) plus truncated BPTT (T=20).
+``--wedge-bits`` / ``--degree`` narrow the stored edge array only.
 """
 from __future__ import annotations
 
@@ -29,6 +19,7 @@ from vn_mobile.io.bptt import (Window, backward_window, finite,
                                pooled_flat, step_state_x)
 from vn_mobile.io.charhead import CharHead
 from vn_mobile.io.lowrank import LowRankHead, softmax
+from vn_mobile.io.quant import narrow
 from vn_mobile.io.vocab import block_of, build_vocab, encode, load_text, split
 
 PRESETS = {
@@ -42,13 +33,12 @@ def count_params(pop, head, train_bias: bool, train_adapters: bool) -> dict:
     r = (head.n_params if isinstance(head, LowRankHead)
          else int(np.asarray(head.w).size))
     b = int(pop.bias.size) if train_bias else 0
-    a = int(pop.adapter_a.size + pop.adapter_b.size) if train_adapters else 0
-    return dict(readout=r, bias=b, adapters=a, total=r + b + a)
+    ad = int(pop.adapter_a.size + pop.adapter_b.size) if train_adapters else 0
+    return dict(readout=r, bias=b, adapters=ad, total=r + b + ad)
 
 
 def inject(members, seq, t, hist: int, decay: float, inj_e, inj_h) -> None:
-    inj_e[:] = 0.0
-    inj_h[:] = 0.0
+    inj_e[:] = 0.0; inj_h[:] = 0.0
     for k in range(hist):
         c = int(seq[(t - k) % seq.size])
         w = np.float32(decay ** k)
@@ -106,7 +96,7 @@ def generate(pop, head, block, members, seed_idx, rng, inj_e, inj_h, vocab,
 
 def roll(pop, head, block, members, seq, rng, inj_e, inj_h, vocab: int,
          hist: int, decay: float, limit: int) -> dict:
-    """Forward-only pass for validation; no gradients, no updates."""
+    """Forward-only validation pass; no gradients, no updates."""
     n = min(limit, seq.size - 1)
     loss, hit = 0.0, 0
     for i in range(n):
@@ -123,15 +113,17 @@ def roll(pop, head, block, members, seq, rng, inj_e, inj_h, vocab: int,
 
 
 def run(steps, n_vn, lr, seed, T, head_kind, rank, preset, hist, decay,
-        val_every, log_every, gen_len):
+        val_every, log_every, gen_len, wedge_bits=32, degree=8):
     text = load_text()
     symbols, stoi = build_vocab(text)
     V = len(symbols)
     tr_txt, va_txt = split(text)
     tr = encode(tr_txt, stoi)
     va = encode(va_txt, stoi)
-    pop = build_population(n=n_vn, degree=8, seed=seed,
+    pop = build_population(n=n_vn, degree=degree, seed=seed,
                            omega_mix=(0.8, 0.3, 1.0))
+    if wedge_bits < 32:
+        pop.wedge = narrow(pop.wedge, wedge_bits)
     block = block_of(n_vn, V)
     members = [np.flatnonzero(block == v) for v in range(V)]
     head = (LowRankHead.make(V, DIM, rank=rank, seed=seed) if head_kind ==
@@ -169,44 +161,39 @@ def run(steps, n_vn, lr, seed, T, head_kind, rank, preset, hist, decay,
                 wall_s=round(time.perf_counter() - t0, 1))), flush=True)
     final = roll(pop, head, block, members, va, rng, inj_e, inj_h, V, hist,
                  decay, 3000)
-    sample = ""
+    sample = (generate(pop, head, block, members, va[:8], rng, inj_e, inj_h,
+                       V, hist, decay, gen_len) if gen_len else "")
     if gen_len:
-        sample = generate(pop, head, block, members, va[:8], rng, inj_e,
-                          inj_h, V, hist, decay, gen_len)
-        with open("samples6c.txt", "w") as fh:
-            fh.write(sample)
+        open("samples6c.txt", "w").write(sample)
     return dict(params=params, hist_cfg=hist_out, final=final, sample=sample,
                 head=head_kind, rank=(rank if head_kind == "lowrank" else 0))
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--steps", type=int, default=20000)
-    ap.add_argument("--n-vn", type=int, default=1000)
-    ap.add_argument("--lr", type=float, default=3e-3)
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--T", type=int, default=20)
+    for f, t, d in (("--steps", int, 20000), ("--n-vn", int, 1000),
+                    ("--lr", float, 3e-3), ("--seed", int, 0),
+                    ("--T", int, 20), ("--rank", int, 16),
+                    ("--hist", int, 1), ("--decay", float, 0.6),
+                    ("--val-every", int, 5000), ("--log-every", int, 0),
+                    ("--gen-len", int, 0), ("--degree", int, 8),
+                    ("--wedge-bits", int, 32)):
+        ap.add_argument(f, type=t, default=d)
     ap.add_argument("--head", default="lowrank", choices=["lowrank", "full"])
-    ap.add_argument("--rank", type=int, default=16)
-    ap.add_argument("--preset", default="readout_bias",
-                    choices=sorted(PRESETS))
-    ap.add_argument("--hist", type=int, default=1)
-    ap.add_argument("--decay", type=float, default=0.6)
-    ap.add_argument("--val-every", type=int, default=5000)
-    ap.add_argument("--log-every", type=int, default=0)
-    ap.add_argument("--gen-len", type=int, default=0)
+    ap.add_argument("--preset", default="readout_bias", choices=sorted(PRESETS))
     ap.add_argument("--out", default="train6c.json")
     a = ap.parse_args()
     r = run(a.steps, a.n_vn, a.lr, a.seed, a.T, a.head, a.rank, a.preset,
-            a.hist, a.decay, a.val_every, a.log_every, a.gen_len)
+            a.hist, a.decay, a.val_every, a.log_every, a.gen_len,
+            a.wedge_bits, a.degree)
     out = dict(steps=a.steps, T=a.T, lr=a.lr, seed=a.seed, head=a.head,
+               wedge_bits=a.wedge_bits, degree=a.degree,
                preset=a.preset, hist=a.hist, params=r["params"],
                hist_cfg=r["hist_cfg"], final=r["final"],
                rss_mb=round(resource.getrusage(
                    resource.RUSAGE_SELF).ru_maxrss / 1024.0, 1))
     print(json.dumps(out, indent=2))
-    with open(a.out, "w") as fh:
-        json.dump(out, fh, indent=2)
+    json.dump(out, open(a.out, "w"), indent=2)
 
 
 if __name__ == "__main__":
