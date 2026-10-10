@@ -2,27 +2,13 @@ import numpy as np
 import pytest
 
 from vn_mobile.core.group import build_blocks, hot_blocks
-from vn_mobile.core.neuron import (
-    DIM,
-    MODE_BACKGROUND,
-    RANK,
-    VNPopulation,
-    build_population,
-    dequantise_u8,
-    quantise_u8,
-)
-from vn_mobile.core.update import (
-    ENERGY_CAP,
-    E_TARGET,
-    aggregate,
-    neighbour_mean,
-    normalise_energy,
-    read_output,
-    step_energy,
-    step_phase,
-    step_state,
-    sync_order_parameter,
-)
+from vn_mobile.core.neuron import (DIM, MODE_BACKGROUND, RANK, VNPopulation,
+                                   build_population, dequantise_u8,
+                                   quantise_u8)
+from vn_mobile.core.update import (ENERGY_CAP, E_TARGET, aggregate,
+                                   neighbour_mean, normalise_energy,
+                                   read_output, step_energy, step_phase,
+                                   step_state, sync_order_parameter)
 from vn_mobile.core.field import Field
 
 
