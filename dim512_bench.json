@@ -1,0 +1,56 @@
+[
+ {
+  "N": 1000,
+  "DIM": 8,
+  "R": 4,
+  "mem_MB": 0.2,
+  "ms_step": 0.23,
+  "param_total": 1280,
+  "param_per_VN": 64
+ },
+ {
+  "N": 1000,
+  "DIM": 128,
+  "R": 16,
+  "mem_MB": 1.0,
+  "ms_step": 14.66,
+  "param_total": 81920,
+  "param_per_VN": 4096
+ },
+ {
+  "N": 1000,
+  "DIM": 512,
+  "R": 16,
+  "mem_MB": 4.6,
+  "ms_step": 24.33,
+  "param_total": 327680,
+  "param_per_VN": 16384
+ },
+ {
+  "N": 10000,
+  "DIM": 512,
+  "R": 16,
+  "mem_MB": 24.3,
+  "ms_step": 316.28,
+  "param_total": 327680,
+  "param_per_VN": 16384
+ },
+ {
+  "N": 10000,
+  "DIM": 512,
+  "R": 4,
+  "mem_MB": 23.3,
+  "ms_step": 164.8,
+  "param_total": 81920,
+  "param_per_VN": 4096
+ },
+ {
+  "N": 10000,
+  "DIM": 256,
+  "R": 16,
+  "mem_MB": 12.6,
+  "ms_step": 197.49,
+  "param_total": 163840,
+  "param_per_VN": 8192
+ }
+]

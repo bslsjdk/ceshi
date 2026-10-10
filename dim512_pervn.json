@@ -1,0 +1,48 @@
+[
+ {
+  "N": 1000,
+  "DIM": 512,
+  "R": 4,
+  "mem_MB": 19.6,
+  "ms_step": 3.8,
+  "param_total": 4096000,
+  "param_per_VN": 4096
+ },
+ {
+  "N": 1000,
+  "DIM": 512,
+  "R": 16,
+  "mem_MB": 68.8,
+  "ms_step": 8.85,
+  "param_total": 16384000,
+  "param_per_VN": 16384
+ },
+ {
+  "N": 10000,
+  "DIM": 512,
+  "R": 4,
+  "mem_MB": 186.8,
+  "ms_step": 90.79,
+  "param_total": 40960000,
+  "param_per_VN": 4096
+ },
+ {
+  "N": 10000,
+  "DIM": 512,
+  "R": 16,
+  "mem_MB": 678.3,
+  "ms_step": 100.6,
+  "param_total": 163840000,
+  "param_per_VN": 16384
+ },
+ {
+  "N": 100000,
+  "DIM": 512,
+  "R": 4,
+  "mem_MB": null,
+  "ms_step": null,
+  "param_total": 409600000,
+  "param_per_VN": 4096,
+  "note": "OOM killed, exit=137"
+ }
+]
