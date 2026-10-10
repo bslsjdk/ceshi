@@ -157,14 +157,21 @@ def test_energy_fixed_point_sits_at_target():
         assert abs(st.energy_mean - E_TARGET) / E_TARGET < 0.20, sigma
 
 
-def test_strong_coupling_synchronises_weak_does_not():
-    """Kuramoto transition: R jumps from ~0 to ~1 as K crosses K_c."""
+def test_coupling_lifts_sync_without_locking():
+    """R rises with K but stops short of locking.
+
+    Under uniform omega_std=0.1 this used to assert R>0.9 at K=0.5.  Stage 4
+    layered omega (80% @0.3 + 20% @1.0) so the bulk keeps a sync frame while a
+    minority keeps drifting: measured R is ~0.30 at K=0.5, ~0.04 at K=0.05.
+    Locking is exactly what the layering exists to prevent.
+    """
     rs = {}
     for k in (0.05, 0.5):
         f = Field(make_pop(n=256, seed=37), seed=37, k_coupling=k)
         rs[k] = f.run(4000).sync_r
     assert rs[0.05] < 0.3
-    assert rs[0.5] > 0.9
+    assert rs[0.5] > 0.25
+    assert rs[0.5] < 0.9
 
 
 def test_weak_drive_leaves_field_flat():
@@ -178,7 +185,7 @@ def test_weak_drive_leaves_field_flat():
 def test_wave_spreads_outward_from_seed():
     """Seed decays while outer shells light up -> the disturbance travels."""
     from diffusion import bfs_layers, run_diffusion
-    res = run_diffusion(n=400, degree=8, seed=0, sigma=4.0, k_coupling=0.2,
+    res = run_diffusion(n=400, degree=8, seed=0, sigma=0.5, k_coupling=0.5,
                         warmup=1500, observe=60, amp=0.5, max_layers=4)
     trace = res["trace"]
     seed_layer, outer = trace[:, 0], trace[:, 2]
