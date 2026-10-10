@@ -1,0 +1,10 @@
+{
+  "exp": 4,
+  "correct": 5,
+  "wrong": 40,
+  "argmax_settled": 5,
+  "argmax_after_wrong": 38,
+  "recovered": true,
+  "rounds_to_recover": 21,
+  "seed": 0
+}
