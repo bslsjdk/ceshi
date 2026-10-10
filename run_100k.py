@@ -16,7 +16,11 @@ from stages5cd import run_5c, run_5d
 from vn_mobile.core.neuron import build_population
 
 t0 = time.perf_counter()
-pop, rs, tz, hist, ov = run_5a(steps=100000, log_every=20000)
+import os
+MODE = os.environ.get("PROMOTE_MODE", "terminal")
+UN = os.environ.get("UTIL_NORM", "zone")
+pop, rs, tz, hist, ov = run_5a(steps=100000, log_every=20000,
+                               promote_mode=MODE, util_norm=UN)
 el = time.perf_counter() - t0
 rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
 arr = sum(v.nbytes for v in vars(pop).values() if isinstance(v, np.ndarray))
@@ -35,6 +39,9 @@ out = dict(
     bn_corr=round(corr, 4), bn_out_std=round(bstd, 6),
     loads=rs.loads, releases=rs.releases, fired=rs.fired,
     cull_rate=tz.cull_log[-1]["cull_rate"], cull_rounds=tz.cull_rounds,
+    promote_mode=MODE, util_norm=UN,
+    merge_rate_per_round=b5.get("merge_rate_per_round"),
+    promote_events=b5.get("promote_events"),
     cull_events=tz.cull_events, reinit=tz.reinit_count,
     bn_alive=int((tz.merged == 0).sum()),
     hibernate=run_5c(pop, rs, "/tmp/f_ll.vnpkg", True),
@@ -43,4 +50,4 @@ out = dict(
     score=sr, stage5b=b5, history=hist,
 )
 print(json.dumps(out, indent=2, default=str))
-open("run_100k.json", "w").write(json.dumps(out, indent=2, default=str))
+open(os.environ.get("OUT", "run_100k.json"), "w").write(json.dumps(out, indent=2, default=str))

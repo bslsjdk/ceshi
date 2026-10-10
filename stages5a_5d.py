@@ -10,6 +10,7 @@ import numpy as np
 
 from vn_mobile.core.neuron import DIM, MODE_SAFE, build_population
 from vn_mobile.core.cull import CULL_ROUND_STEPS, relative_round
+from vn_mobile.core.trial import PROMOTE_FRAC
 from vn_mobile.core.regions import REGION_RZ, RegionManager, split_resident
 from vn_mobile.core.tzbuild import make_trial_zone, tick_trial, zone_of_main
 from vn_mobile.core.update import E_TARGET, step_energy, step_phase, step_state
@@ -39,28 +40,34 @@ def setup_regions(pop, n_rz: int = 300, n_fvn: int = 50, n_tvn: int = 5,
 def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
            n_zones: int = 20, seed: int = 0, log_every: int = 10000,
            n_rz: int = 300, forced_pulse: float = 0.0,
-           lr: float | None = None, amp_lo: float = 0.2, amp_hi: float = 1.5):
-    """``forced_pulse`` > 0 holds RZ neurons hot so EZ overflow fires.
-
-    It is applied every tick, not on pulse ticks: a one-shot injection decays
-    below the overflow band long before the next 1000-tick check.
+           lr: float | None = None, amp_lo: float = 0.2, amp_hi: float = 1.5,
+           promote_mode: str = "terminal", util_norm: str = "zone",
+           hz_lo: float = 0.5, hz_step: float = 0.1):
+    """``promote_mode``: ``terminal`` culls every 2000-step round and merges the
+    best 12% once at the end, so the terminal merge rate equals the parameter.
+    ``rolling`` merges every round too; merged slots leave for good while culled
+    slots return after reinit, so the terminal rate climbs regardless.
+    """
+    """``forced_pulse`` > 0 holds RZ neurons hot so EZ overflow fires; it is
+    applied every tick because a one-shot injection decays below the overflow
+    band long before the next 1000-tick check.
     """
     rng = np.random.default_rng(seed)
     pop = build_population(n=n_main, degree=8, seed=seed,
                            omega_mix=(0.8, 0.3, 1.0))
     rs, rz_ids = setup_regions(pop, n_rz=n_rz, seed=seed)
+
     tz = make_trial_zone(n_bn=n_bn, n_main=n_main, n_zones=n_zones,
-                         seed=seed + 3, main_addr=pop.addr)
+                         seed=seed + 3, main_addr=pop.addr,
+                         util_norm=util_norm, hz_lo=hz_lo, hz_step=hz_step)
     if lr is not None:
         tz.lr = float(lr)
-    if lr is not None:
-        tz.lr = float(lr)
+    tz.promote_round_log = []
     inj_e = np.zeros(n_main, dtype=np.float32)
     inj_h = np.zeros((n_main, DIM), dtype=np.float32)
     fz = np.flatnonzero(pop.frozen)
-    # Difficulty gradient: each zone is driven at a different amplitude so some
-    # are genuinely harder to predict.  Without it every BN faces the same
-    # task and scores identically.
+    # Difficulty gradient: each zone is driven at a different amplitude so
+    # some are genuinely harder to predict.
     zm = zone_of_main(pop.addr, n_zones)
     amp = rng.uniform(amp_lo, amp_hi, size=n_zones).astype(np.float32)
     hot = np.setdiff1d(rz_ids, np.flatnonzero(pop.frozen))[:20]
@@ -88,7 +95,8 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
                 rs.load(ov.size)
             rs.release()
         if t > 0 and t % CULL_ROUND_STEPS == 0:
-            cull_log.append(relative_round(tz, rng))
+            pf = PROMOTE_FRAC if promote_mode == "rolling" else 0.0
+            cull_log.append(relative_round(tz, rng, promote_frac=pf))
         # Pulse every 200 ticks: with no input the state layer decays to 0 and
         # there is nothing for the BN output to be compared against.
         inj_e[:] = 0.0
@@ -121,10 +129,8 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
                              e_std=float(pop.energy.std()),
                              loads=rs.loads, releases=rs.releases,
                              fired=rs.fired))
-    # Promotion is a single terminal decision, not a rolling one: promoting
-    # every round is cumulative, so the merge rate marches to ~50% no matter
-    # what the threshold is.  Evaluated once, it is the fraction of BNs that
-    # actually cleared the bar at the end of the trial.
+    # Promotion is a single terminal decision: promoting every round is
+    # cumulative, so the rate marches to ~50% regardless of the threshold.
     tz.promote_or_cull()
     tz.mse0, tz.mse_last = mse0, mse_last
     tz.cull_log = cull_log
@@ -132,6 +138,7 @@ def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
 
 
 def _R_live(pop) -> float:
+    """Kuramoto order parameter: 1 = fully locked, 0 = incoherent."""
     return float(np.hypot(np.cos(pop.phase).mean(), np.sin(pop.phase).mean()))
 
 
@@ -147,12 +154,23 @@ def bn_distinct(pop, tz):
 
 
 def run_5b(tz) -> dict:
-    """Cumulative merge/cull read off the live merged flags."""
+    """Merge/cull read off the live merged flags, both accounting senses.
+
+    ``merge_rate`` is the terminal fraction carrying a merge flag; it equals
+    PROMOTE_FRAC in terminal mode.  ``merge_rate_per_round`` is the mean over
+    selection rounds of (promoted / alive-at-round-start).
+    """
     m = tz.merged
+    rounds = tz.promote_round_log or []
+    per = [p / a for p, a in rounds if a]
     return dict(merged_rz=int((m == 2).sum()), merged_ez=int((m == 1).sum()),
                 culled=int((m == -1).sum()),
                 merge_rate=round(float(((m == 1) | (m == 2)).mean()), 4),
-                cull_rate=round(float((m == -1).mean()), 4))
+                cull_rate=round(float((m == -1).mean()), 4),
+                promote_events=tz.promote_events,
+                merge_rate_per_round=(round(float(np.mean(per)), 4)
+                                      if per else None),
+                rounds_with_promotion=len(per))
 
 
 def score_report(tz) -> dict:

@@ -1,53 +1,110 @@
-# Stage 5A final — 100k-step report
+# Stage 5A final — relative promotion + continuous utilisation
 
-Commit `2dad34335b2b` (main). Command: `python3 run_100k.py`.
+100 000 steps, 1000 main VN, 1000 BN, 20 zones. Command:
+
+```
+python3 diag100k.py          # 80.3 s, 803 us/step, RSS 17.7 MB
+pytest -q                    # 33 tests collected, 33 passed
+```
 
 ## Criteria
 
-| criterion | target | measured | |
+| Criterion | Target | Previous | Now | |
+|---|---|---|---|---|
+| Merge rate | 5–20 % | 48.4 % | **12.0 %** | PASS (was FAIL) |
+| Cull rate | 40 % ± 10 % | 0.400 | **0.400** | PASS |
+| `score_std` | > 0.05 | 0.1648 | **0.1027** | PASS |
+| `between > within` | division of labour | 0.0163 / 0.0314 (0.52) | **0.0119 / 0.0930 (0.128)** | **FAIL — worse** |
+| BN count | 1000 ± 10 % | 1000 | 880 alive + 120 merged | PASS |
+| MSE drop | > 30 % | 0.567 | **0.432** | PASS |
+| BN vs main corr | < 0.8 | 0.0025 | **-0.0405** | PASS |
+| no NaN / e_max<0.95 | | ok | False / 0.4984 | PASS |
+| hibernate byte-exact | True | True | **True** | PASS |
+| archive ratio | > 3x | 5.235 | **5.235** | PASS |
+| rollback / leak | ok / 0 MB | ok | **ok / 0.0 MB** | PASS |
+
+## What worked: promotion is now relative
+
+Merging used an absolute floor (`score > 0.7`). An **untrained** BN already
+scores ~0.668 and a trained one ~0.75, so the distribution straddled the
+threshold and the merge rate pinned to 48 % regardless of training. Ranking
+inside each zone and taking the best `PROMOTE_FRAC = 0.12` makes the rate a
+parameter: measured **0.120**, and `test_promote_rate_is_independent_of_
+absolute_score` shows it stays 12 % when every score is scaled by 0.5x or 10x.
+
+Two accounting senses, both reported:
+
+* `merge_rate` (terminal fraction carrying a merge flag) = **0.120**
+* `merge_rate_per_round` (mean over selection rounds of promoted/alive)
+
+`promote_mode="rolling"` (merge every 2000-step round) is also implemented and
+is the wrong reading: merged slots leave for good while culled slots come back
+after reinit, so the terminal rate climbs toward 100 % whatever the fraction is.
+Terminal merge is the correct sense for this criterion.
+
+## What did not work: `between > within` got worse
+
+The continuous utilisation
+
+```
+util_i = sigmoid((|pred_i| - median_zone) / (std_zone + eps))
+```
+
+was meant to remove the binary gate's bimodality. It does, but it made
+within-zone spread **worse**, not better: 0.0314 → **0.0930**, and the ratio
+fell from 0.52 to **0.128**.
+
+The reason is structural. Dividing by the zone's *own* standard deviation
+rescales every zone to unit width, so the sigmoid output has std ≈ 0.2 inside
+**every** zone whether or not the BNs differ in skill — measured `util`
+within = 0.1966 against between = 0.0159. The spread is a property of the
+normalisation, not of the population.
+
+Per-component breakdown at 100 k (within / between):
+
+| component | weight | within | between |
 |---|---|---|---|
-| NaN free | 100k steps | no NaN | PASS |
-| e_max < 0.95 | not saturated | 0.4984 | PASS |
-| e_mean ≈ 0.3 ±20% | 0.24–0.36 | 0.2932 | PASS |
-| e_std > 0.05 |波动够大 | 0.0640 | PASS |
-| BN output distinguishable | corr < 0.8 | 0.0025 | PASS |
-| MSE drop | > 30% | 56.7% | PASS |
-| score_std | > 0.05 | 0.1648 | PASS |
-| cull rate (per 2000-step round) | 40% ±10% | 0.400 | PASS |
-| BN count | 1000 ±10% | 1000 (516 unmerged) | PASS |
-| EZ load / release | both > 0 | 944 / 940 | PASS |
-| hibernate byte-identical | True | True | PASS |
-| archive ratio | > 3x | 5.235x | PASS |
-| rollback / switch / leak | ok / <100ms / 0 | ok / 0.4ms / 0 MB | PASS |
-| **merge rate** | **5%–20%** | **48.4%** | **FAIL** |
-| **between > within zone std** | division of labour | 0.0163 vs 0.0314 | **FAIL** |
+| acc | 0.40 | 0.1461 | 0.0238 |
+| util | 0.20 | 0.1966 | 0.0159 |
+| contrib | 0.20 | 0.0551 | 0.0099 |
+| cost | -0.05 | 0.0516 | 0.0085 |
+| conflict | -0.05 | 0.2162 | 0.0151 |
 
-## Sampling
+Every component has within ≈ 10x its between. That is not a tuning problem:
+`within` is *individual skill spread* and `between` is *task difficulty spread*,
+and in a self-supervised prediction task the former is an order of magnitude
+larger than the latter.
 
-```
-us/step 772.7      wall 77.3 s for 100k steps
-arrays  2.631 MB   rss 19.4 MB (getrusage ru_maxrss)
-```
+## The two criteria pull against each other
 
-## Why the two failures are structural
+Training increases `within` and leaves `between` flat, so the ratio falls
+exactly as learning succeeds:
 
-**Merge rate.** Promotion is a single terminal decision, so merge rate = P(score > 0.7).
-An untrained BN already scores 0.668 (acc 0.70 from `1/(1+50*se)` at se≈0.0085), a trained
-one 0.75. The distribution straddles the threshold, so roughly half clears it. Making the
-task learnable (MSE drop > 30%) necessarily lifts scores, which lifts the merge rate —
-measured trade-off at 100k steps: lr 0.005 → drop 7%, merge 15%; lr 0.03 → drop 57%,
-merge 48%. The two targets pull in opposite directions.
+| steps | MSE drop | between | within | b/w |
+|---|---|---|---|---|
+| 20 000 | 0.18 | 0.0114 | 0.0388 | 0.294 |
+| 100 000 | **0.43** | 0.0119 | **0.0930** | **0.128** |
 
-**Between vs within zone.** `between` is the std of zone means, `within` the mean std inside
-a zone. `within` is dominated by the utilisation term, which is bimodal by construction
-(gate = median, so half of every zone reads 1 and half 0, worth ±0.1). Widening the per-zone
-difficulty contrast barely moves the ratio: amplitude U(0.2,1.5) → 0.267, U(0.02,6.0) → 0.298.
+Widening the difficulty gradient does not rescue it. Scanning the per-zone
+horizon and drive amplitude (all at 20 k):
 
-## Fixes applied this round
+| variant | b/w | MSE drop |
+|---|---|---|
+| spec (hz 25→120 tick) | 0.37 | 0.17 |
+| wide horizon (hz 10→390) | 0.39 | 0.11 |
+| wide amplitude (U(0.02, 6.0)) | 0.33 | 0.08 |
+| both wide | 0.41 | 0.03 |
+| extreme horizon (hz 1→950) | **0.535** | **0.039** |
 
-- `acc = 1/(1+50*se)`, utilisation gate = running `median(|pred|)`
-- restored `-0.05*cost -0.05*conflict` (both were silently 0.0 in the first pass)
-- `train_step` no longer divides by N — each BN owns its adapters, so the batch-mean
-  scaling made the gradient ~1e-7 and lr had **no measurable effect** across 5e-3…1e-1
-- per-zone horizon `BASE_HORIZON*(0.5+0.1*i)` = 25…120 ticks
-- culling relative (worst 40% per zone / 2000 steps), promotion terminal
+Best ratio reached anywhere: **0.535**, and it costs the MSE criterion (0.039
+against a 0.30 floor). `between > within` and `MSE drop > 30 %` cannot both hold
+here.
+
+## Options for the next round
+
+1. Put zone identity into the score, not just ability — e.g. weight `acc` by the
+   zone's own difficulty so easy zones gain less from the same accuracy.
+2. Relax the criterion to an absolute floor on `between` (it is a stable 0.012
+   and clearly non-zero; the zones really do differ, just less than individuals do).
+3. Share adapters inside a zone to shrink individual spread — this trades away
+   the per-BN perturbation the spec asks for.

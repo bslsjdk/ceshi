@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from .neuron import MODE_TRIAL, build_population
-from .trial import (BASE_HORIZON, SAMPLE_EVERY, TrialZone, CULL_WINDOW)
+from .trial import BASE_HORIZON, SAMPLE_EVERY, TrialZone
 from .update import step_energy, step_phase
 
 
@@ -20,20 +20,23 @@ def zone_of_main(main_addr: np.ndarray, n_zones: int) -> np.ndarray:
     return z
 
 
-def zone_horizon(zone_id: np.ndarray, n_zones: int) -> np.ndarray:
+def zone_horizon(zone_id: np.ndarray, n_zones: int, lo: float = 0.5,
+                 step: float = 0.1) -> np.ndarray:
     """Samples of look-ahead per zone: BASE_HORIZON*(0.5+0.1*i) ticks.
 
     Zone 0 predicts 25 ticks out, zone 19 predicts 120.  Unequal difficulty is
     what makes cross-zone score spread exceed within-zone spread.
     """
     i = np.asarray(zone_id, dtype=np.float64)
-    ticks = BASE_HORIZON * (0.5 + 0.1 * np.minimum(i, n_zones - 1))
+    ticks = BASE_HORIZON * (lo + step * np.minimum(i, n_zones - 1))
     return np.maximum(2, (ticks / SAMPLE_EVERY + 0.5).astype(np.int32))
 
 
 def make_trial_zone(n_bn: int = 1000, n_main: int = 1000, n_zones: int = 20,
                     k_shadow: int = 8, degree: int = 6, seed: int = 7,
-                    main_addr: np.ndarray | None = None) -> TrialZone:
+                    main_addr: np.ndarray | None = None,
+                    util_norm: str = "zone", hz_lo: float = 0.5,
+                    hz_step: float = 0.1) -> TrialZone:
     """BNs get their own graph, their own zone, and their own dynamics."""
     rng = np.random.default_rng(seed)
     if main_addr is None:
@@ -75,12 +78,12 @@ def make_trial_zone(n_bn: int = 1000, n_main: int = 1000, n_zones: int = 20,
         stab=np.zeros(n_bn, dtype=np.float32),
         pred_mean=np.zeros(n_bn, dtype=np.float32),
         prev_shadow=np.zeros(n_bn, dtype=np.float32),
-        low_count=np.zeros(n_bn, dtype=np.int32),
-        low_ring=np.zeros((CULL_WINDOW, n_bn), dtype=bool),
-        ring_pos=0,
         zero_util_steps=np.zeros(n_bn, dtype=np.int32),
         merged=np.zeros(n_bn, dtype=np.int8),
-        hz_bn=zone_horizon(zone_id, n_zones),
+        hz_bn=zone_horizon(zone_id, n_zones, lo=hz_lo, step=hz_step),
+        util_norm=util_norm,
+        reinit_round=np.zeros(n_bn, dtype=np.int32),
+        samples=np.zeros(n_bn, dtype=np.int32),
     )
 
 

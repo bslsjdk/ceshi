@@ -22,11 +22,11 @@ from .neuron import DIM, VNPopulation
 from .update import step_energy, step_phase
 
 TZ_BUDGET_BYTES = 100 * 1024 * 1024
-CULL_WINDOW = 2000      # samples kept for the proportional cull test
-CULL_LOW_FRAC = 0.5     # cull when score<0.3 for more than half the window
+CULL_WINDOW = 2000      # selection-round length, kept for callers
 LOW_THRESHOLD = 0.3
 ACC_COEF = 50.0         # 1/(1+10*se) was too flat to separate BNs
 CULL_FRAC = 0.40        # relative: worst 40% of each zone, every 2000 steps
+PROMOTE_FRAC = 0.12     # relative: best 12% of each zone merges, not score>0.7
 BASE_HORIZON = 50       # ticks; zone i uses BASE_HORIZON*(0.5+0.1*i)
 SAMPLE_EVERY = 10       # ticks between stored shadow samples
 
@@ -43,16 +43,19 @@ class TrialZone:
     stab: np.ndarray         # float32 [N_bn] E[x^2] accumulator
     pred_mean: np.ndarray    # float32 [N_bn] E[x] accumulator
     prev_shadow: np.ndarray  # float32 [N_bn] shadow energy one sample ago
-    low_count: np.ndarray    # int32 [N_bn] low samples inside the window
-    low_ring: np.ndarray     # bool [CULL_WINDOW, N_bn]
-    ring_pos: int
     zero_util_steps: np.ndarray  # int32 [N_bn]
     merged: np.ndarray       # int8 [N_bn] 0=trial 1=EZ 2=RZ -1=culled
     hz_bn: np.ndarray        # int32 [N_bn] prediction lag in samples
     cull_events: int = 0     # cumulative relative culls
     cull_rounds: int = 0     # how many 2000-step rounds have run
+    samples: np.ndarray = None   # evaluate calls since the slot was reset
     reinit_count: int = 0
+    promote_events: int = 0  # cumulative relative promotions
+    promote_round_log: list = None   # (promoted, alive) per round
+    last_parts: dict = None   # per-component breakdown of the last score
+    reinit_round: np.ndarray = None   # selection round a slot was reset in
     lr: float = 3e-2
+    util_norm: str = "zone"   # "zone" (spec) or "global" scale
 
     def shadow_energy(self, main_energy: np.ndarray) -> np.ndarray:
         return main_energy[self.shadow].mean(axis=1)
@@ -94,6 +97,8 @@ class TrialZone:
         return float(np.mean(err ** 2))
 
     def evaluate(self, prev_shadow: np.ndarray, target: np.ndarray) -> None:
+        if self.samples is not None:
+            self.samples += 1        # evaluate calls since the slot was reset
         """Stage 5B score + cull-window sample; same prev->current pair as train."""
         pred = self._predict(prev_shadow)
         act = np.abs(pred)
@@ -102,10 +107,25 @@ class TrialZone:
         # Per-BN baseline: squared error of a zero predictor for THIS zone.
         base = (target * target).astype(np.float32)
         contrib = np.maximum(0.0, base - se) / (base + 1e-6)
-        # Utilisation gate tracks the running median, not a fixed constant that
-        # every BN cleared at once (which made util std exactly 0).
-        gate = float(np.median(act)) if act.size else 0.0
-        self.util = 0.99 * self.util + 0.01 * (act > gate).astype(np.float32)
+        # Continuous utilisation, scored against this BN's own zone:
+        # sigmoid((|pred| - median_zone) / (std_zone + eps)).  A binary median
+        # gate is bimodal by construction -- half of every zone reads 1 and half
+        # reads 0 -- so within-zone spread was the gate's artifact.
+        med_a = np.zeros_like(act)
+        std_a = np.zeros_like(act)
+        for u in np.unique(self.zone_id):
+            m = self.zone_id == u
+            if m.any():
+                med_a[m] = float(np.median(act[m]))
+                std_a[m] = float(np.std(act[m]))
+        if self.util_norm == "global":
+            # Dividing by the zone's own std rescales every zone to unit width,
+            # so sigmoid output has std ~0.19 inside EVERY zone regardless of
+            # skill.  A global scale encodes level and leaves spread alone.
+            med_a[:] = float(np.median(act)) if act.size else 0.0
+            std_a[:] = float(np.std(act)) if act.size else 1.0
+        inst = 1.0 / (1.0 + np.exp(-(act - med_a) / (std_a + 1e-6)))
+        self.util = 0.99 * self.util + 0.01 * inst.astype(np.float32)
         # Variance, not magnitude: scoring |pred| punishes a BN for being
         # accurate, because a well-trained BN necessarily has a larger output.
         self.pred_mean = 0.99 * self.pred_mean + 0.01 * pred
@@ -113,9 +133,8 @@ class TrialZone:
         var = np.maximum(0.0, self.stab - self.pred_mean ** 2)
         stab_score = 1.0 / (1.0 + var)
         # The two penalty terms the spec lists and the first pass silently
-        # dropped (both constant 0.0), which is why every score sat at ~0.72.
-        # cost = output magnitude; conflict = distance from this zone's
-        # consensus prediction, i.e. how much the BN disagrees with its peers.
+        # dropped (both constant 0.0).  cost = output magnitude; conflict =
+        # distance from this zone's consensus prediction.
         cost = np.clip(act, 0.0, 1.0)
         med = np.zeros_like(pred)
         for u in np.unique(self.zone_id):
@@ -125,26 +144,47 @@ class TrialZone:
         self.score = (0.4 * acc + 0.2 * self.util + 0.2 * contrib
                       + 0.1 * stab_score - 0.05 * cost
                       - 0.05 * conflict).astype(np.float32)
+        self.last_parts = dict(acc=acc, util=self.util, contrib=contrib,
+                               stab=stab_score, cost=cost, conflict=conflict)
 
-        self._sample_cull_window()
 
-    def _sample_cull_window(self) -> None:
-        """Record one low-score sample; the window is the cull evidence."""
-        low = self.score < LOW_THRESHOLD
-        self.low_count += low.astype(np.int32) - self.low_ring[self.ring_pos]
-        self.low_ring[self.ring_pos] = low
-        self.ring_pos = (self.ring_pos + 1) % CULL_WINDOW
+    def promote_relative(self, promote_frac: float = PROMOTE_FRAC
+                         ) -> tuple[int, int]:
+        """Merge the best ``promote_frac`` of each zone, ranked against peers.
+
+        An absolute 0.7 floor has no discriminating power: an untrained BN
+        already scores ~0.668 and a trained one ~0.75, so the distribution
+        straddles the threshold and the merge rate pins to ~48%.  Ranking makes
+        the rate a parameter instead of a coincidence.
+        """
+        alive = np.flatnonzero(self.merged == 0)
+        if alive.size == 0:
+            return 0, 0
+        n_rz = n_ez = 0
+        for u in np.unique(self.zone_id[alive]):
+            idx = np.flatnonzero((self.zone_id == u) & (self.merged == 0))
+            k = int(round(idx.size * promote_frac))
+            if k <= 0:
+                continue
+            best = idx[np.argsort(-self.score[idx])[:k]]
+            top = best[self.score[best] > 0.85]      # elites go resident
+            rest = np.setdiff1d(best, top)
+            self.merged[top] = 2
+            self.merged[rest] = 1
+            n_rz += int(top.size)
+            n_ez += int(rest.size)
+        self.promote_events += n_rz + n_ez
+        if self.promote_round_log is not None:
+            self.promote_round_log.append((n_rz + n_ez, int(alive.size)))
+        return n_rz, n_ez
 
     def promote_or_cull(self) -> tuple[int, int, int]:
-        """Score>0.85 -> RZ, >0.7 -> EZ.  Culling is relative; see cull.py."""
-        s = self.score
+        """Terminal merge decision; culling is relative, see cull.py."""
         self.zero_util_steps = np.where(self.util <= 1e-6,
                                         self.zero_util_steps + 1, 0)
-        to_rz = np.flatnonzero((s > 0.85) & (self.merged == 0))
-        to_ez = np.flatnonzero((s > 0.7) & (s <= 0.85) & (self.merged == 0))
-        self.merged[to_rz] = 2
-        self.merged[to_ez] = 1
-        return int(to_rz.size), int(to_ez.size), 0
+        n_rz, n_ez = self.promote_relative()
+        return n_rz, n_ez, 0
+
 
     def zone_stats(self) -> dict:
         """Between-zone vs within-zone score spread (division of labour)."""

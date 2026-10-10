@@ -13,7 +13,7 @@ from stages5cd import run_5c, run_5d
 from vn_mobile.core.neuron import DIM, build_population
 from vn_mobile.core.regions import REGION_EZ, REGION_RZ, RegionManager
 from vn_mobile.core.cull import relative_round
-from vn_mobile.core.trial import CULL_WINDOW
+from vn_mobile.core.trial import CULL_WINDOW, PROMOTE_FRAC
 from vn_mobile.core.tzbuild import make_trial_zone, zone_of_main
 from vn_mobile.core.update import E_TARGET, step_energy, step_phase
 
@@ -149,3 +149,46 @@ def test_rollback_and_no_leak():
     assert d["rollback_ok"]
     assert d["switch_s"] < 0.1
     assert abs(d["rss_delta_mb"]) < 20.0
+
+# --- 5A final: promotion is relative too (best 12% of each zone) -----
+def test_promote_takes_best_12pct_of_each_zone():
+    """Merging ranks against zone peers, so the rate is a parameter."""
+    tz = make_trial_zone(n_bn=500, n_main=200, n_zones=10, seed=5)
+    tz.score[:] = np.random.default_rng(0).uniform(0.0, 1.0, size=500)
+    before = tz.score.copy()
+    n_rz, n_ez = tz.promote_relative()
+    assert n_rz + n_ez == 60                       # 12% of 500
+    assert int(((tz.merged == 1) | (tz.merged == 2)).sum()) == 60
+    for u in np.unique(tz.zone_id):                # exactly the top of each zone
+        m = np.flatnonzero(tz.zone_id == u)
+        top = set(m[np.argsort(-before[m])[:6]].tolist())
+        got = set(np.flatnonzero((tz.merged == 1) | (tz.merged == 2)).tolist())
+        assert top <= got
+
+
+def test_promote_rate_is_independent_of_absolute_score():
+    """An absolute floor would merge 0% or 100%; relative always merges 12%."""
+    tz = make_trial_zone(n_bn=500, n_main=200, n_zones=10, seed=5)
+    for shift in (0.0, 0.5, 5.0):                  # same ranking, other level
+        tz.merged[:] = 0
+        tz.score[:] = np.random.default_rng(1).uniform(0, 1, size=500) * shift
+        n_rz, n_ez = tz.promote_relative()
+        assert n_rz + n_ez == 60
+
+
+def test_util_is_continuous_not_a_binary_gate():
+    """The median gate was bimodal by construction; sigmoid must not be."""
+    from vn_mobile.core.update import step_energy, step_phase
+    tz = make_trial_zone(n_bn=100, n_main=200, n_zones=10, seed=5)
+    pop = build_population(n=200, degree=8, seed=1)
+    rng = np.random.default_rng(0)
+    for _ in range(30):
+        prev = tz.shadow_energy(pop.energy)
+        step_energy(pop, rng)
+        step_phase(pop)
+        cur = tz.shadow_energy(pop.energy)
+        tz.train_step(prev, cur)
+        tz.evaluate(prev, cur)
+    u = tz.util
+    assert u.min() > 0.0 and u.max() < 1.0
+    assert len(np.unique(np.round(u, 4))) > 10      # many levels, not just {0,1}

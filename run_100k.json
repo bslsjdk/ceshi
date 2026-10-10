@@ -1,24 +1,28 @@
 {
   "steps": 100000,
-  "wall_s": 77.3,
-  "us_per_step": 772.7,
-  "rss_mb": 19.4,
+  "wall_s": 82.1,
+  "us_per_step": 821.4,
+  "rss_mb": 19.5,
   "arrays_mb": 2.631,
   "nan": false,
   "e_max": 0.4984,
   "e_mean": 0.2932,
   "e_std": 0.064,
   "top_frac": 0.0,
-  "bn_corr": 0.0025,
-  "bn_out_std": 0.062499,
+  "bn_corr": -0.0405,
+  "bn_out_std": 0.056815,
   "loads": 944,
   "releases": 940,
   "fired": 5,
   "cull_rate": 0.4,
   "cull_rounds": 49,
+  "promote_mode": "terminal",
+  "util_norm": "zone",
+  "merge_rate_per_round": 0.0024,
+  "promote_events": 120,
   "cull_events": 19600,
   "reinit": 19600,
-  "bn_alive": 516,
+  "bn_alive": 880,
   "hibernate": {
     "size": 272142,
     "ratio": 1.088,
@@ -43,18 +47,21 @@
     "rss_delta_mb": 0.0
   },
   "score": {
-    "score_std": 0.1648,
-    "score_mean": 0.694,
-    "mse_drop": 0.5665,
-    "between_zone_std": 0.016302019357681274,
-    "within_zone_std": 0.031358636915683746
+    "score_std": 0.1027,
+    "score_mean": 0.6891,
+    "mse_drop": 0.4315,
+    "between_zone_std": 0.011877797544002533,
+    "within_zone_std": 0.09303626418113708
   },
   "stage5b": {
-    "merged_rz": 389,
-    "merged_ez": 95,
+    "merged_rz": 0,
+    "merged_ez": 120,
     "culled": 0,
-    "merge_rate": 0.484,
-    "cull_rate": 0.0
+    "merge_rate": 0.12,
+    "cull_rate": 0.0,
+    "promote_events": 120,
+    "merge_rate_per_round": 0.0024,
+    "rounds_with_promotion": 50
   },
   "history": [
     {
