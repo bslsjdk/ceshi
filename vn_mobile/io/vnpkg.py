@@ -138,7 +138,7 @@ def load(path: str) -> Snapshot:
                     dequantise_u8(view("adapter_b", np.uint8, (n, dim, rank)),
                                   -0.05, 0.05)),
         region=view("region", np.uint8, (n,)),
-        trigger_at=view("trigger_at", np.float64, (n,)),
+        trigger_at=view("trigger_at", np.float32, (n,)),
         meta=meta,
     )
 
@@ -149,7 +149,7 @@ def hibernate(path: str, pop, rs, level: int = 3,
     return save(path, Snapshot(
         energy=pop.energy.copy(), phase=pop.phase.copy(),
         state=pop.state.copy(), adapters_a=pop.adapter_a.copy(),
-        adapters_b=pop.adapter_b.copy(), region=rs.region.copy(),
+        adapters_b=pop.adapter_b.copy(), region=pop.region.copy(),
         trigger_at=rs.trigger_at.copy(),
         meta={"n": pop.n, "dim": int(pop.state.shape[1]),
               "rank": int(pop.adapter_a.shape[1]),
@@ -167,5 +167,5 @@ def wake(path: str, pop, rs) -> None:
     pop.state[:] = snap.state.reshape(pop.state.shape)
     pop.adapter_a[:] = snap.adapters_a.reshape(pop.adapter_a.shape)
     pop.adapter_b[:] = snap.adapters_b.reshape(pop.adapter_b.shape)
-    rs.region[:] = snap.region
+    pop.region[:] = snap.region
     rs.trigger_at[:] = snap.trigger_at
