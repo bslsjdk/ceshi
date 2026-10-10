@@ -48,6 +48,8 @@ class VNPopulation:
     bias: np.ndarray        # float32 [DIM]
     adapter_a: np.ndarray   # float32 [N, RANK, DIM]
     adapter_b: np.ndarray   # float32 [N, DIM, RANK]
+    region: np.ndarray      # uint8 [N]   0=RZ 1=EZ 2=TZ (stage 4)
+    frozen: np.ndarray      # bool [N]    FVN: never mutated (stage 4)
 
     @property
     def n_edges(self) -> int:
@@ -83,11 +85,32 @@ def _random_edges(n: int, degree: int, rng: np.random.Generator):
     return a[order].astype(np.int32), b[order].astype(np.int32)
 
 
+def make_omega(n: int, rng: np.random.Generator,
+               std: float = 0.3,
+               mix: tuple[float, float, float] | None = None) -> np.ndarray:
+    """Intrinsic frequencies, optionally layered.
+
+    ``mix`` = (frac_on_std, std, std2): the first ``frac`` of neurons get
+    N(0, std) and the rest N(0, std2).  Stage 4 uses 80% @ 0.3 + 20% @ 1.0 so
+    the bulk keeps a sync frame while a minority keeps the phase drifting.
+    """
+    if mix is None:
+        return rng.normal(0.0, std, size=n).astype(np.float32)
+    frac, s1, s2 = mix
+    k = int(round(n * frac))
+    out = np.empty(n, dtype=np.float32)
+    out[:k] = rng.normal(0.0, s1, size=k)
+    out[k:] = rng.normal(0.0, s2, size=n - k)
+    return out
+
+
 def build_population(n: int = 1000, degree: int = 8, seed: int = 0,
                      mode: int = MODE_BACKGROUND,
                      health: int = 16,
-                     weight_sigma: float = 0.1,
-                     omega_std: float = 0.1) -> VNPopulation:
+                     weight_sigma: float = 0.5,
+                     omega_std: float = 0.3,
+                     omega_mix: tuple[float, float, float] | None = None,
+                     region: int = 0) -> VNPopulation:
     """Create a population with a random degree-``degree`` graph.
 
     Weight mean is exactly 0 (centred) so no systematic positive feedback can
@@ -122,7 +145,7 @@ def build_population(n: int = 1000, degree: int = 8, seed: int = 0,
         adapter_ref=np.arange(n, dtype=np.int64).astype(np.uint32),
         energy=rng.uniform(0.0, 0.2, size=n).astype(np.float32),
         phase=phase,
-        omega=rng.normal(0.0, omega_std, size=n).astype(np.float32),
+        omega=make_omega(n, rng, omega_std, omega_mix),
         mode=np.full(n, mode, dtype=np.uint8),
         health=np.full(n, health, dtype=np.uint8),
         direction=direction,
@@ -134,4 +157,6 @@ def build_population(n: int = 1000, degree: int = 8, seed: int = 0,
         bias=np.zeros(DIM, dtype=np.float32),
         adapter_a=rng.normal(0.0, 0.01, size=(n, RANK, DIM)).astype(np.float32),
         adapter_b=rng.normal(0.0, 0.01, size=(n, DIM, RANK)).astype(np.float32),
+        region=np.full(n, region, dtype=np.uint8),
+        frozen=np.zeros(n, dtype=bool),
     )
