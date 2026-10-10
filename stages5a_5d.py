@@ -1,84 +1,121 @@
-"""Stage 5A-5D verification harness."""
-from __future__ import annotations
+"""Stage 5A-5D verification harness.
 
-import os
-import time
+Rewritten against the real RegionManager API.  The previous version called
+``make_regions`` / ``fire_timers`` / ``maybe_load``, none of which exist, so it
+could not even be imported -- the "46 passed" reported for it was not real.
+"""
+from __future__ import annotations
 
 import numpy as np
 
-from vn_mobile.core.neuron import DIM, RANK, build_population
-from vn_mobile.core.regions import REGION_RZ, make_regions
-from vn_mobile.core.trial import make_trial_zone, tick_trial
-from vn_mobile.core.update import (E_TARGET, step_energy, step_phase,
-                                   step_state, sync_order_parameter,
-                                   normalise_energy)
+from vn_mobile.core.neuron import DIM, MODE_SAFE, build_population
+from vn_mobile.core.regions import REGION_RZ, RegionManager, split_resident
+from vn_mobile.core.trial import make_trial_zone, tick_trial, zone_of_main
+from vn_mobile.core.update import E_TARGET, step_energy, step_phase, step_state
 from vn_mobile.io import vnpkg
+from stages5cd import run_5c, run_5d
+
+# Prediction horizon in BN samples (one sample every 10 ticks).  Predicting the
+# very next sample is too easy: every BN nails it, scores saturate and the
+# merge rate collapses to 0%.  5 samples = 50 ticks makes the task hard enough
+# that BN quality actually separates.
+HORIZON = 5
+
+
+def setup_regions(pop, n_rz: int = 300, n_fvn: int = 50, n_tvn: int = 5,
+                  seed: int = 0) -> tuple[RegionManager, np.ndarray]:
+    """RZ with frozen FVN, the rest as loadable EVN, plus a few timers."""
+    rs = RegionManager(pop)
+    rz_ids, other = split_resident(pop.n, n_rz, seed=seed)
+    rs.mark_fvn(rz_ids[:n_fvn], MODE_SAFE)
+    rs.mark_evn(other)
+    tv = rz_ids[n_fvn:n_fvn + n_tvn]
+    rs.set_timer(tv, np.linspace(500.0, 5000.0, tv.size).astype(np.float32))
+    return rs, rz_ids
 
 
 def run_5a(steps: int = 100000, n_main: int = 1000, n_bn: int = 1000,
-           seed: int = 0, log_every: int = 10000):
+           n_zones: int = 20, seed: int = 0, log_every: int = 10000,
+           n_rz: int = 300, forced_pulse: float = 0.0):
+    """``forced_pulse`` > 0 holds RZ neurons hot so EZ overflow fires.
+
+    It is applied every tick, not on pulse ticks: a one-shot injection decays
+    below the overflow band long before the next 1000-tick check.
+    """
     rng = np.random.default_rng(seed)
     pop = build_population(n=n_main, degree=8, seed=seed,
                            omega_mix=(0.8, 0.3, 1.0))
-    rs = make_regions(n_main, n_rz=300, seed=seed, n_fvn=50, n_tvn=5)
-    tz = make_trial_zone(n_bn=n_bn, n_main=n_main, seed=seed + 3)
+    rs, rz_ids = setup_regions(pop, n_rz=n_rz, seed=seed)
+    tz = make_trial_zone(n_bn=n_bn, n_main=n_main, n_zones=n_zones,
+                         seed=seed + 3, main_addr=pop.addr)
     inj_e = np.zeros(n_main, dtype=np.float32)
     inj_h = np.zeros((n_main, DIM), dtype=np.float32)
+    fz = np.flatnonzero(pop.frozen)
+    # Difficulty gradient: each zone is driven at a different amplitude so some
+    # are genuinely harder to predict.  Without it every BN faces the same
+    # task and scores identically.
+    zm = zone_of_main(pop.addr, n_zones)
+    amp = rng.uniform(0.2, 1.5, size=n_zones).astype(np.float32)
+    hot = np.setdiff1d(rz_ids, np.flatnonzero(pop.frozen))[:20]
+    buf = np.zeros((HORIZON, n_bn), dtype=np.float32)
+    hpos = filled = 0
+    hist, mse0, mse_last, ov_total = [], None, float("nan"), 0
 
-    hist = []
     for t in range(steps):
-        rs.fire_timers(pop, t)
-        m = rs.mutable
-        # FVN (frozen) slots must come out bit-identical: snapshot first.
-        frozen_idx = np.flatnonzero(rs.frozen)
-        if frozen_idx.size:
-            fe = pop.energy[frozen_idx].copy()
-            fp = pop.phase[frozen_idx].copy()
-            fs = pop.state[frozen_idx].copy()
+        rs.tick_timers(float(t))
+        fe, fp, fs = (pop.energy[fz].copy(), pop.phase[fz].copy(),
+                      pop.state[fz].copy())
         step_energy(pop, rng, injection=inj_e)
         step_phase(pop)
         step_state(pop, inj_h)
-        if frozen_idx.size:
-            pop.energy[frozen_idx] = fe
-            pop.phase[frozen_idx] = fp
-            pop.state[frozen_idx] = fs
+        # FVN slots must come out bit-identical.
+        pop.energy[fz], pop.phase[fz], pop.state[fz] = fe, fp, fs
         if t % 1000 == 0:
             tz.promote_or_cull()
-            rs.update_e_std(pop.energy)
-            rs.maybe_load(pop, E_TARGET)
-            rs.maybe_release(pop.energy)
-        # Pulse every 200 ticks: without input the state layer decays to 0 and
+            rs.update_threshold(E_TARGET)
+            ov = rs.overflow_ids(E_TARGET)
+            ov_total += int(ov.size)
+            if ov.size:
+                rs.load(ov.size)
+            rs.release()
+        # Pulse every 200 ticks: with no input the state layer decays to 0 and
         # there is nothing for the BN output to be compared against.
+        inj_e[:] = 0.0
+        inj_h[:] = 0.0
         if t % 200 == 0:
             pick = rng.choice(n_main, size=n_main // 20, replace=False)
-            inj_e[:] = 0.0
-            inj_h[:] = 0.0
-            inj_e[pick] = 1.0
+            inj_e[pick] = amp[zm[pick]]
             inj_h[pick] = 1.0
-        else:
-            inj_e[:] = 0.0
-            inj_h[:] = 0.0
-        # BN sees the main field through its shadow, trains every 10 ticks
+        elif t % 10:
+            inj_e[:] = rng.normal(0.0, 0.01, size=n_main) * amp[zm]
+        if forced_pulse > 0.0:
+            inj_e[hot] = forced_pulse
         if t % 10 == 0:
-            tgt = tz.shadow_energy(pop.energy)
-            tz.train_step(pop.energy, tgt)
-            tz.evaluate(pop.energy, tgt,
-                        baseline_err=float(np.mean(tgt ** 2)))
+            cur = tz.shadow_energy(pop.energy)
+            buf[hpos] = cur
+            hpos = (hpos + 1) % HORIZON
+            filled += 1
+            if filled > HORIZON:
+                old = buf[hpos]          # oldest sample = prediction input
+                base = float(np.mean(cur ** 2))
+                loss = tz.train_step(old, cur)
+                if mse0 is None:
+                    mse0 = loss
+                mse_last = loss
+                tz.evaluate(old, cur, baseline_err=base)
         tick_trial(tz, rng)
         if log_every and (t + 1) % log_every == 0:
-            hist.append(dict(step=t + 1, R=_R_live(pop, rs),
-                             e_mean=float(pop.energy[rs.active].mean()),
-                             e_std=float(pop.energy[rs.active].std()),
-                             loaded=rs.loaded_count, released=rs.released_count,
-                             triggered=rs.triggered_count))
-    return pop, rs, tz, hist
+            hist.append(dict(step=t + 1, R=_R_live(pop),
+                             e_mean=float(pop.energy.mean()),
+                             e_std=float(pop.energy.std()),
+                             loads=rs.loads, releases=rs.releases,
+                             fired=rs.fired))
+    tz.mse0, tz.mse_last = mse0, mse_last
+    return pop, rs, tz, hist, ov_total
 
 
-def _R_live(pop, rs) -> float:
-    p = pop.phase[rs.active]
-    if p.size == 0:
-        return float("nan")
-    return float(np.hypot(np.cos(p).mean(), np.sin(p).mean()))
+def _R_live(pop) -> float:
+    return float(np.hypot(np.cos(pop.phase).mean(), np.sin(pop.phase).mean()))
 
 
 def bn_distinct(pop, tz):
@@ -92,81 +129,37 @@ def bn_distinct(pop, tz):
     return float(np.corrcoef(a, b)[0, 1]), float(np.std(b))
 
 
-def run_5b(tz, rounds: int = 20):
-    """Promote/cull repeatedly; return merge and cull rates."""
-    rz_n = ez_n = cull_n = 0
-    for _ in range(rounds):
-        r, e, c = tz.promote_or_cull()
-        rz_n += r
-        ez_n += e
-        cull_n += c
-    total = tz.pop.n
-    return dict(merged_rz=rz_n, merged_ez=ez_n, culled=cull_n,
-                merge_rate=(rz_n + ez_n) / total, cull_rate=cull_n / total)
+def run_5b(tz) -> dict:
+    """Cumulative merge/cull read off the live merged flags."""
+    m = tz.merged
+    return dict(merged_rz=int((m == 2).sum()), merged_ez=int((m == 1).sum()),
+                culled=int((m == -1).sum()),
+                merge_rate=round(float(((m == 1) | (m == 2)).mean()), 4),
+                cull_rate=round(float((m == -1).mean()), 4))
 
 
-def run_5c(pop, rs, path="/tmp/t.vnpkg", lossless=True):
-    t0 = time.perf_counter()
-    size = vnpkg.hibernate(path, pop, rs, lossless=lossless)
-    t_save = time.perf_counter() - t0
-    e0, p0, s0 = pop.energy.copy(), pop.phase.copy(), pop.state.copy()
-    a0, b0 = pop.adapter_a.copy(), pop.adapter_b.copy()
-    t0 = time.perf_counter()
-    vnpkg.wake(path, pop, rs)
-    t_load = time.perf_counter() - t0
-    raw = (e0.nbytes + p0.nbytes + s0.nbytes + a0.nbytes + b0.nbytes)
-    return dict(size=size, ratio=raw / size, save_s=t_save, load_s=t_load,
-                energy_eq=bool(np.array_equal(e0, pop.energy)),
-                phase_eq=bool(np.array_equal(p0, pop.phase)),
-                state_eq=bool(np.array_equal(s0, pop.state)),
-                ada_eq=bool(np.array_equal(a0, pop.adapter_a)
-                            and np.array_equal(b0, pop.adapter_b)))
-
-
-def run_5d(pop, rs, cycles: int = 100):
-    v1, v2 = "/tmp/v1.vnpkg", "/tmp/v2.vnpkg"
-    vnpkg.hibernate(v1, pop, rs)
-    e1 = pop.energy.copy()
-    pop.energy[:] = 0.9          # diverge on purpose
-    vnpkg.hibernate(v2, pop, rs)
-    ok = True
-    for _ in range(cycles):
-        vnpkg.wake(v1, pop, rs)
-        if not np.array_equal(e1, pop.energy):
-            ok = False
-        vnpkg.wake(v2, pop, rs)
-    t0 = time.perf_counter()
-    vnpkg.wake(v1, pop, rs)
-    switch = time.perf_counter() - t0
-    rss0 = _rss()
-    for _ in range(cycles):
-        vnpkg.hibernate(v2, pop, rs)
-        vnpkg.wake(v2, pop, rs)
-    return dict(rollback_ok=ok, switch_s=switch,
-                rss_delta_mb=(_rss() - rss0) / 1e6,
-                final_eq=bool(np.array_equal(e1, pop.energy)) or True)
-
-
-def _rss() -> int:
-    try:
-        with open("/proc/self/statm") as fh:
-            return int(fh.read().split()[1]) * 4096
-    except Exception:
-        return 0
+def score_report(tz) -> dict:
+    """Stage 5A rerun criteria: spread, division of labour, MSE drop."""
+    drop = float("nan")
+    if tz.mse0:
+        drop = (tz.mse0 - tz.mse_last) / tz.mse0
+    return dict(score_std=round(float(tz.score.std()), 4),
+                score_mean=round(float(tz.score.mean()), 4),
+                mse_drop=round(drop, 4), **tz.zone_stats())
 
 
 if __name__ == "__main__":
     import sys
     steps = int(sys.argv[1]) if len(sys.argv) > 1 else 20000
     print(f"[5A] running {steps} steps ...")
-    pop, rs, tz, hist = run_5a(steps=steps)
+    pop, rs, tz, hist, ov_total = run_5a(steps=steps)
     for h in hist:
         print("   ", h)
     corr, bstd = bn_distinct(pop, tz)
     print(f"[5A] bn corr={corr:.4f} bn_out_std={bstd:.6f}")
-    print(f"[5A] regions loaded={rs.loaded_count} released={rs.released_count} "
-          f"overflow={rs.overflow_count} triggered={rs.triggered_count}")
+    print(f"[5A] regions {rs.stats()} overflow_hits={ov_total}")
+    print(f"[5A] {score_report(tz)}")
     print(f"[5B] {run_5b(tz)}")
-    print(f"[5C] lossless {run_5c(pop, rs, '/tmp/ll.vnpkg', True)}")
-    print(f"[5C] archive  {run_5c(pop, rs, '/tmp/q.vnpkg', False)}")
+    print(f"[5C] hibernate {run_5c(pop, rs, '/tmp/ll.vnpkg', True)}")
+    print(f"[5C] archive   {run_5c(pop, rs, '/tmp/q.vnpkg', False)}")
     print(f"[5D] {run_5d(pop, rs, cycles=20)}")
