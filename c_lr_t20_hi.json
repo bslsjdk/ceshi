@@ -1,0 +1,63 @@
+{
+  "steps": 20000,
+  "T": 20,
+  "lr": 0.01,
+  "seed": 0,
+  "head": "lowrank",
+  "preset": "readout_bias",
+  "hist": 1,
+  "params": {
+    "readout": 9360,
+    "bias": 8,
+    "adapters": 0,
+    "total": 9368
+  },
+  "hist_cfg": [
+    {
+      "step": 5000,
+      "train_bits": 5.0974,
+      "val": {
+        "val_loss": 3.3846,
+        "val_acc": 0.071,
+        "val_bits": 4.883
+      },
+      "wall_s": 5.5
+    },
+    {
+      "step": 10000,
+      "train_bits": 4.6965,
+      "val": {
+        "val_loss": 3.3282,
+        "val_acc": 0.1495,
+        "val_bits": 4.8015
+      },
+      "wall_s": 10.8
+    },
+    {
+      "step": 15000,
+      "train_bits": 4.6896,
+      "val": {
+        "val_loss": 3.2882,
+        "val_acc": 0.146,
+        "val_bits": 4.7438
+      },
+      "wall_s": 16.1
+    },
+    {
+      "step": 20000,
+      "train_bits": 4.5988,
+      "val": {
+        "val_loss": 3.2396,
+        "val_acc": 0.1605,
+        "val_bits": 4.6737
+      },
+      "wall_s": 21.4
+    }
+  ],
+  "final": {
+    "val_loss": 3.2186,
+    "val_acc": 0.167,
+    "val_bits": 4.6434
+  },
+  "rss_mb": 42.8
+}
