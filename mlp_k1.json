@@ -1,0 +1,48 @@
+{
+  "k": 1,
+  "hidden": 80,
+  "params": 10545,
+  "hist": [
+    {
+      "step": 5000,
+      "val": {
+        "val_loss": 2.7155,
+        "val_acc": 0.241,
+        "val_bits": 3.9176
+      },
+      "wall_s": 2.6
+    },
+    {
+      "step": 10000,
+      "val": {
+        "val_loss": 2.6596,
+        "val_acc": 0.2483,
+        "val_bits": 3.837
+      },
+      "wall_s": 5.2
+    },
+    {
+      "step": 15000,
+      "val": {
+        "val_loss": 2.6459,
+        "val_acc": 0.2317,
+        "val_bits": 3.8172
+      },
+      "wall_s": 7.9
+    },
+    {
+      "step": 20000,
+      "val": {
+        "val_loss": 2.6322,
+        "val_acc": 0.243,
+        "val_bits": 3.7974
+      },
+      "wall_s": 10.6
+    }
+  ],
+  "final": {
+    "val_loss": 2.6322,
+    "val_acc": 0.243,
+    "val_bits": 3.7974
+  }
+}
