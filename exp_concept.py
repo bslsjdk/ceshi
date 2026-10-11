@@ -35,6 +35,12 @@ def common(seed=0):
     return len(symbols), encode(tr_txt, stoi), encode(va_txt, stoi)
 
 
+VARIANTS = {
+    "v1": dict(signed=False, nonlinear=False, psi_max=0.0, norm_global=True),
+    "v11": dict(signed=True, nonlinear=True, psi_max=10.0, norm_global=False),
+}
+
+
 def make(n=1000, dc=32, nlayers=1, k=8, seed=0, dorm=0.3):
     f = ConceptField.create(n, dc, nlayers, k, seed=seed, dormancy=dorm)
     c = CharCodec(n, dc, seed=seed) if False else None
@@ -43,9 +49,10 @@ def make(n=1000, dc=32, nlayers=1, k=8, seed=0, dorm=0.3):
 
 # ---------------- exp 1 ----------------
 def exp1(budget=300000, lr=1e-3, seed=0, val_limit=3000, n=1000, dc=32,
-         k=8, dorm=0.3, rounds=12):
+         k=8, dorm=0.3, rounds=12, variant="v11"):
     V, tr, va = common(seed)
-    f = ConceptField.create(n, dc, 1, k, seed=seed, dormancy=dorm)
+    f = ConceptField.create(n, dc, 1, k, seed=seed, dormancy=dorm,
+                            **VARIANTS[variant])
     codec = CharCodec(V, dc, seed=seed)
     opt = Adam(lr=lr)
     t0 = time.perf_counter()
@@ -53,7 +60,9 @@ def exp1(budget=300000, lr=1e-3, seed=0, val_limit=3000, n=1000, dc=32,
                           log_every=25000, tag="cw")
     fb, facc, _ = run(f, codec, va[:val_limit], None, hist=1000, rounds=rounds)
     fa = float(np.mean([_frac(f, codec, int(t)) for t in va[:200]]))
-    return dict(exp=1, model="concept_wave",
+    dom = float(np.mean([_dominance(f, codec, int(t)) for t in va[:100]]))
+    return dict(exp=1, model="concept_wave", variant=variant,
+                concept_sim_top5=round(dom, 4),
                 params=int(codec.emb.size + codec.bias.size + 1),
                 val_bits=round(float(fb), 4), val_acc=round(float(facc), 4),
                 train_bits_last=curve[-1]["train_bits"] if curve else None,
@@ -64,6 +73,16 @@ def exp1(budget=300000, lr=1e-3, seed=0, val_limit=3000, n=1000, dc=32,
                     resource.RUSAGE_SELF).ru_maxrss / 1024, 1))
 
 
+def _dominance(f, codec, tok):
+    """cos(concept, char) of the 5 most energetic nodes after settling."""
+    f.set_context(codec.ctx_vector([tok]))
+    codec.inject_char(f, tok)
+    f.settle(max_rounds=12)
+    e = f.energy()
+    top = np.argsort(-e)[:5]
+    return float(cosine(f.cn[top], normalise(codec.emb[tok].reshape(1, -1))).mean())
+
+
 def _frac(f, codec, tok):
     f.set_context(codec.ctx_vector([tok]))
     codec.inject_char(f, tok)
@@ -72,8 +91,9 @@ def _frac(f, codec, tok):
 
 
 # ---------------- exp 2 ----------------
-def exp2(seed=0, n=1000, dc=32, k=8, rounds=10):
-    f = ConceptField.create(n, dc, 1, k, seed=seed, dormancy=0.0)
+def exp2(seed=0, n=1000, dc=32, k=8, rounds=10, variant="v11"):
+    f = ConceptField.create(n, dc, 1, k, seed=seed, dormancy=0.0,
+                            **VARIANTS[variant])
     rng = np.random.default_rng(seed + 7)
     c1 = normalise(rng.normal(size=(1, dc)))[0]
     c2 = normalise(rng.normal(size=(1, dc)))[0]
@@ -109,30 +129,35 @@ def exp2(seed=0, n=1000, dc=32, k=8, rounds=10):
         traj.append(round(e_err, 5))
         f.settle(max_rounds=1)
     first, last = traj[0], traj[-1]
-    return dict(exp=2, phase_sweep=sweep,
+    fp = float((f.edges["base"] > 0).mean())
+    return dict(exp=2, variant=variant, frac_positive=round(fp, 4),
+                phase_sweep=sweep,
                 wrong_path_traj=traj,
                 wrong_path_decay=round(1 - last / first, 4) if first else None)
 
 
 # ---------------- exp 3 ----------------
-def exp3(budget=100000, lr=1e-3, seed=0, val_limit=3000, rounds=12):
+def exp3(budget=100000, lr=1e-3, seed=0, val_limit=3000, rounds=12,
+         variant="v11"):
     V, tr, va = common(seed)
     out = {}
     for hist in (100, 1000):
-        f = ConceptField.create(1000, 32, 1, 8, seed=seed, dormancy=0.3)
+        f = ConceptField.create(1000, 32, 1, 8, seed=seed, dormancy=0.3,
+                                **VARIANTS[variant])
         codec = CharCodec(V, 32, seed=seed)
         opt = Adam(lr=lr)
         run(f, codec, tr[:budget], opt, hist=hist, rounds=rounds)
         b, a, _ = run(f, codec, va[:val_limit], None, hist=hist, rounds=rounds)
         out[f"hist{hist}"] = dict(val_bits=round(float(b), 4),
                                   val_acc=round(float(a), 4))
-    return dict(exp=3, **out)
+    return dict(exp=3, variant=variant, **out)
 
 
 # ---------------- exp 4 ----------------
-def exp4(seed=0, n=1000, dc=32, k=8, rounds=100):
+def exp4(seed=0, n=1000, dc=32, k=8, rounds=100, variant="v11"):
     V, tr, va = common(seed)
-    f = ConceptField.create(n, dc, 1, k, seed=seed, dormancy=0.3)
+    f = ConceptField.create(n, dc, 1, k, seed=seed, dormancy=0.3,
+                            **VARIANTS[variant])
     codec = CharCodec(V, dc, seed=seed)
     correct, wrong = 5, 40
     f.set_context(codec.ctx_vector([correct]))
@@ -149,7 +174,7 @@ def exp4(seed=0, n=1000, dc=32, k=8, rounds=100):
         if int(np.argmax(codec.logits(f))) == correct:
             recovered, steps = True, i + 1
             break
-    return dict(exp=4, correct=correct, wrong=wrong,
+    return dict(exp=4, variant=variant, correct=correct, wrong=wrong,
                 argmax_settled=base, argmax_after_wrong=after_wrong,
                 recovered=bool(recovered), rounds_to_recover=steps)
 
@@ -160,16 +185,17 @@ if __name__ == "__main__":
     ap.add_argument("--budget", type=int, default=300000)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--variant", default="v11", choices=["v1", "v11"])
     ap.add_argument("--out", default="exp_concept.json")
     a = ap.parse_args()
     if a.exp == "1":
-        r = exp1(budget=a.budget, lr=a.lr, seed=a.seed)
+        r = exp1(budget=a.budget, lr=a.lr, seed=a.seed, variant=a.variant)
     elif a.exp == "2":
-        r = exp2(seed=a.seed)
+        r = exp2(seed=a.seed, variant=a.variant)
     elif a.exp == "3":
-        r = exp3(budget=a.budget, lr=a.lr, seed=a.seed)
+        r = exp3(budget=a.budget, lr=a.lr, seed=a.seed, variant=a.variant)
     else:
-        r = exp4(seed=a.seed)
+        r = exp4(seed=a.seed, variant=a.variant)
     r.update(seed=a.seed)
     print("RESULT " + json.dumps(r))
     with open(f"{a.out}", "w") as fh:
