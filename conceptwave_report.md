@@ -3,7 +3,9 @@
 ## 0. 交付与可复现性
 
 ```
-远端 91 文件 vs 本地 91 文件，diff 为空，匹配。
+远端 HEAD = 09a782e3011acb4725ece6c2d8b68b0094e83848（main）
+远端 blob 总数 = 157
+本轮 13 个交付文件逐个回读：byte-identical = True（13/13）
 pytest --collect-only -q  →  66 tests collected
 pytest -q                 →  66 passed
 ```
