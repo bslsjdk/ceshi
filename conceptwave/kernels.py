@@ -29,17 +29,24 @@ def cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return normalise(a) @ normalise(b).T
 
 
-def _knn(sim: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """k strongest neighbours per row, self excluded. -> (rows, dst, val)."""
+def _knn(sim: np.ndarray, k: int, signed: bool = True,
+         key: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """k strongest neighbours per row, self excluded. -> (rows, dst, val).
+
+    ``signed`` selects by |cos| and keeps the sign.  Selecting by the raw
+    cosine (signed=False) only ever picks positive neighbours, which closes
+    the second interference channel: nothing can ever cancel by sign.
+    """
     n = sim.shape[0]
     k = min(k, n - 1)
-    idx = np.argpartition(-sim, k - 1, axis=1)[:, :k]
+    key = np.abs(sim) if key is None else key
+    idx = np.argpartition(-key, k - 1, axis=1)[:, :k]
     rows = np.repeat(np.arange(n), k)
     dst = idx.ravel()
     return rows, dst, sim[rows, dst]
 
 
-def build_edges(concept, layer, per_layer, k, nlayers):
+def build_edges(concept, layer, per_layer, k, nlayers, signed=True):
     """Signed CSR for all six directions.  Returns dict of arrays."""
     n = concept.shape[0]
     sim = cosine(normalise(concept).astype(np.float32),
@@ -47,7 +54,11 @@ def build_edges(concept, layer, per_layer, k, nlayers):
     rows_l, dst_l, val_l = [], [], []
     same = sim.copy()
     np.fill_diagonal(same, -np.inf)
-    r, d, v = _knn(same, k)
+    # |cos| ranking would otherwise rank the -inf self entry first
+    key = np.abs(sim)
+    np.fill_diagonal(key, -np.inf)
+    r, d, v = _knn(same, k, signed=signed, key=key if signed else None)
+    v = sim[r, d]
     keep = layer[d] == layer[r]
     rows_l.append(r[keep]); dst_l.append(d[keep]); val_l.append(v[keep])
     p = np.arange(n) % per_layer
