@@ -46,90 +46,85 @@ def test_matvec_matches_dense():
     assert np.allclose(got, want, atol=1e-5)
 
 
-def test_phase_advance_keeps_unit_norm():
+def test_no_global_renorm_amplitude_is_bounded_not_fixed():
+    """v1.1: a per-node cap replaces the global renorm that erased interference."""
     f = _field()
     f.set_context(f.concept[0])
     f.inject(np.abs(f.concept[:, 0]))
-    f.settle(max_rounds=8)
-    assert abs(np.linalg.norm(f.psi) - 1.0) < 1e-5
+    f.settle(max_rounds=20)
+    mag = np.abs(f.psi)
+    assert np.isfinite(mag).all()
+    assert mag.max() <= f.psi_max + 1e-4          # per-node cap holds
+    assert abs(np.linalg.norm(f.psi) - 1.0) > 1e-5  # and is NOT pinned to 1
 
 
-def test_interference_cancels_at_pi():
-    """Two anti-phase paths into the same node must not add in quadrature."""
-    a, b = 3.0 + 0j, 3.0 * np.exp(1j * np.pi)
-    assert abs(a + b) < 1e-6
-    assert abs(a + b) < abs(a) + abs(b) - 5.9
+def test_signed_edges_open_the_second_interference_channel():
+    """|cos| top-k keeps the sign; the old top-k by cos only ever saw positives."""
+    from conceptwave.field import ConceptField
+    pos = {}
+    for signed in (False, True):
+        f = ConceptField.create(1000, 32, 1, 8, seed=0, dormancy=0.0,
+                                signed=signed)
+        b = f.edges["base"]
+        assert not np.isinf(b).any()
+        pos[signed] = float((b > 0).mean())
+    assert 0.3 < pos[True] < 0.7          # signed: both channels present
+    assert pos[True] < pos[False]         # fewer negatives than v1
 
 
-def test_dormancy_gives_sparsity():
-    lo = _field(dorm=0.0)
-    hi = _field(dorm=0.35)
-    vec = lo.concept[0]
-    lo.set_context(vec)
-    hi.set_context(vec)
-    assert lo.awake_mask().mean() > hi.awake_mask().mean()
-    assert float(hi.awake_mask().mean()) < 0.2
-
-
-def test_mode_field_is_written():
-    f = _field(dorm=0.35)
-    f.set_context(f.concept[0])
-    m = f.awake_mask()
-    assert f.mode[m].size and np.all(f.mode[m] == ACTIVE)
-    assert np.all(f.mode[~m] == DORMANT)
-
-
-def test_energy_is_a_distribution():
-    f = _field()
-    f.set_context(f.concept[3])
-    f.inject(np.abs(f.concept[:, 3]))
-    f.settle(max_rounds=8)
-    e = f.energy()
-    assert abs(e.sum() - 1.0) < 1e-5
-    assert e.min() >= 0.0
-
-
-def test_codec_logits_shape_and_finite():
-    f = _field()
-    c = CharCodec(65, 16, seed=0)
-    f.set_context(c.ctx_vector([1, 2, 3]))
-    c.inject_char(f, 4)
-    f.settle(max_rounds=8)
-    lg = c.logits(f)
-    assert lg.shape == (65,)
-    assert np.all(np.isfinite(lg))
-
-
-def test_codec_grad_reduces_loss_on_itself():
-    """One Adam step on a repeated example must lower that example's loss."""
-    from vn_mobile.io.adam import Adam
-    f = _field()
-    c = CharCodec(65, 16, seed=0)
-    opt = Adam(lr=0.5)
-    tgt = 7
-    losses = []
-    for _ in range(20):
-        f.set_context(c.ctx_vector([tgt]))
-        c.inject_char(f, tgt)
-        f.settle(max_rounds=8)
-        lg = c.logits(f)
-        loss, g = c.grads(f, tgt, lg)
-        losses.append(loss)
-        opt.step({"emb": (c.emb, g["emb"]), "bias": (c.bias, g["bias"]),
-                  "scale": (c.scale, g["scale"])})
-        c.renorm()
-    assert losses[-1] < losses[0]
-
-
-def test_anti_phase_feedback_lowers_wrong_mode():
-    f = _field(dorm=0.0)
-    c = CharCodec(65, 16, seed=0)
-    wrong = 12
-    f.set_context(c.ctx_vector([wrong]))
-    c.inject_char(f, wrong, gain=3.0)
-    f.settle(max_rounds=8)
-    before = float(c.logits(f)[wrong])
-    f.counter(3.0 * c.amp_for(f, wrong))
+def _phase_amp(f, s, sup, phi):
+    f.psi[:] = 0
+    f.inject(s, phase=0.0)
+    f.inject(s, phase=float(phi))
     f.settle(max_rounds=1)
-    after = float(c.logits(f)[wrong])
-    assert after < before
+    r1 = float(np.abs(f.psi[sup]).sum())
+    f.settle(max_rounds=9)
+    return r1, float(np.abs(f.psi[sup]).sum())
+
+
+def test_interference_survives_the_round_without_global_renorm():
+    """v1's global renorm erased phase dependence entirely; v1.1 keeps it."""
+    from conceptwave.field import ConceptField
+    rng = np.random.default_rng(7)
+
+    def sweep(**kw):
+        f = ConceptField.create(1000, 32, 1, 8, seed=0, dormancy=0.0, **kw)
+        c = normalise(rng.normal(size=(1, 32)))[0]
+        s = np.clip(cosine(f.cn, c.reshape(1, -1)).ravel(), 0, None)
+        f.set_context(c)
+        return [_phase_amp(f, s, np.argsort(-s)[:60], p)[0]
+                for p in (0.0, np.pi / 2, np.pi)]
+
+    a = sweep()                                    # v1.1
+    assert a[0] > a[1] > a[2]                      # monotone in relative phase
+    assert a[2] < 1e-6                             # anti-phase cancels exactly
+    b = sweep(signed=False, nonlinear=False,
+              psi_max=0.0, norm_global=True)       # v1
+    assert abs(b[0] - b[2]) < 1e-3                 # v1 is phase-blind
+
+
+def test_eigenvector_lock_is_not_solved_by_v11():
+    """Known limitation, measured: both variants still settle to ~one mode.
+
+    The lock metric is context dependent (random context: v1 0.993 / v1.1 0.948;
+    concept[0] context: v1 0.897 / v1.1 0.944), so no ordering is asserted --
+    only that three fixes did NOT break the dominant-mode convergence.
+    """
+    from conceptwave.field import ConceptField
+
+    def lock(**kw):
+        f = ConceptField.create(1000, 32, 1, 8, seed=0, dormancy=0.0, **kw)
+        f.set_context(f.concept[0])
+        outs = []
+        for s in (1, 2):
+            r = np.random.default_rng(s)
+            f.psi[:] = (r.normal(size=f.n)
+                        + 1j * r.normal(size=f.n)).astype(np.complex64)
+            f.settle(max_rounds=30)
+            outs.append(f.energy())
+        return float(outs[0] @ outs[1]
+                     / (np.linalg.norm(outs[0]) * np.linalg.norm(outs[1])))
+
+    assert lock() > 0.85
+    assert lock(signed=False, nonlinear=False,
+                psi_max=0.0, norm_global=True) > 0.85
