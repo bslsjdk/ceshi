@@ -1,0 +1,11 @@
+{
+  "exp": 4,
+  "variant": "v1",
+  "correct": 5,
+  "wrong": 40,
+  "argmax_settled": 5,
+  "argmax_after_wrong": 5,
+  "recovered": true,
+  "rounds_to_recover": 1,
+  "seed": 0
+}
